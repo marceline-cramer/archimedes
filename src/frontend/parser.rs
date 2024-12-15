@@ -91,7 +91,7 @@ impl Module {
                     &node,
                     &mut cursor,
                 ))),
-                "comment" => continue,
+                "comment" | "import" => continue,
                 other => unimplemented!("unexpected node {other:?}"),
             }
         }
@@ -136,11 +136,6 @@ impl Parse for Constraint<Range, String, String> {
             .map(|node| Parse::parse(src, &node, cursor))
             .unwrap();
 
-        let bound = node
-            .child_by_field_name("bound")
-            .map(|node| Parse::parse(src, &node, cursor))
-            .unwrap();
-
         let body: Vec<_> = node
             .children_by_field_name("body", cursor)
             .filter(|node| node.is_named())
@@ -154,7 +149,6 @@ impl Parse for Constraint<Range, String, String> {
         Self {
             captures,
             kind,
-            bound,
             body,
         }
     }
@@ -165,7 +159,13 @@ impl Parse for ConstraintKind {
         use ConstraintKind::*;
         let node = node.named_child(0).unwrap();
         match node.kind() {
-            "cardinality" => Cardinality(Parse::parse(src, &node, cursor)),
+            "uniform" => Uniform,
+            "cardinality" => {
+                let kind = Parse::parse(src, &node, cursor);
+                let bound = node.named_child(1).unwrap();
+                let bound = Parse::parse(src, &bound, cursor);
+                Cardinality(kind, bound)
+            }
             other => unreachable!("unexpected node kind {other:?}"),
         }
     }

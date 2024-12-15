@@ -99,13 +99,11 @@ where
     fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
         let captures = self.captures.map_span(cb);
         let kind = self.kind.map_span(cb);
-        let bound = self.bound.map_span(cb);
         let body = self.body.map_span(cb);
 
         Constraint {
             captures,
             kind,
-            bound,
             body,
         }
     }

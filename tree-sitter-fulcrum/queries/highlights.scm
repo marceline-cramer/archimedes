@@ -2,9 +2,12 @@
 (integer) @constant.numeric
 (variable) @variable
 (pattern (symbol) @constant)
+(import (symbol) @module)
+(uniform) @keyword
 
 (rule head: (atom relation: (symbol) @function))
-(rule_body (atom relation: (symbol) @constant))
+(rule (_) (atom relation: (symbol) @constant))
+(constraint (_) (atom relation: (symbol) @constant))
 
 [ "," "." ] @punctuation.delimiter
 [ "(" ")" ] @punctuation.bracket
@@ -14,6 +17,8 @@
   "decide"
   "if"
   "cardinality"
+  "soft"
+  "import"
 ] @keyword
 
 (constraint_kind) @keyword.control

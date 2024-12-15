@@ -146,13 +146,13 @@ pub struct Rule<S, R, T> {
 pub struct Constraint<S, R, T> {
     pub captures: Vec<Spanned<S, String>>,
     pub kind: Spanned<S, ConstraintKind>,
-    pub bound: Spanned<S, i64>,
     pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub enum ConstraintKind {
-    Cardinality(CardinalityConstraintKind),
+    Uniform,
+    Cardinality(CardinalityConstraintKind, i64),
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]

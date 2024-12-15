@@ -1,0 +1,40 @@
+import Math.(Add, Range)
+
+Day(day) if Range(0, 14, day).
+
+decide Assignment(day, chore, member) if Day(day), Chore(chore), Member(member).
+
+constrain(day, member) cardinality to at most 2 Assignment(day, chore, member).
+
+AnyAssigned(day, chore) if Assignment(day, chore, member).
+
+AssignedInterval(chore, day, interval) if
+	AnyAssigned(day, chore),
+	Add(day, interval, day2),
+	AnyAssigned(day2, chore).
+
+constrain uniform
+	Fixed(chore, interval),
+	AssignedInterval(chore, day, interval).
+
+constrain soft(2) uniform
+	Fuzzy(chore, interval),
+	AssignedInterval(chore, day, interval).
+
+AssignedAround(chore, day) if
+	Add(day, -1, start),
+	Add(day, 1, end),
+	Range(start, end, neighbor),
+	AnyAssigned(neighbor, chore).
+
+constrain uniform
+	Fuzzy(chore, interval),
+	AnyAssigned(day, chore),
+	Add(day, interval, day2),
+	AssignedAround(day2, chore).
+
+constrain uniform
+	FollowUp(parent, child, interval),
+	AnyAssigned(day, parent),
+	Add(day, interval, day2),
+	AnyAssigned(day2, child).

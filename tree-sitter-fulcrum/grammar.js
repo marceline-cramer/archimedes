@@ -27,7 +27,7 @@ module.exports = grammar({
   extras: $ => [$._whitespace, $.comment],
 
   rules: {
-    file: $ => repeat(choice($.rule, $.decision, $.constraint)),
+    file: $ => repeat(choice($.import, $.rule, $.decision, $.constraint)),
 
     _whitespace: _ => /[ \n\r\t]/,
     comment: _ => /;.*\n/,
@@ -38,26 +38,36 @@ module.exports = grammar({
 
     integer: _ => choice("0", /-?[1-9][0-9]*/),
 
+    import: $ => seq(
+      "import",
+      $.symbol,
+      repeat(seq(".", $.symbol)),
+      ".",
+      paren_list($.symbol),
+    ),
+
     decision: $ => seq("decide", $.rule),
     rule: $ => seq(field("head", $.atom), field("body", optional(seq("if", $._rule_body))), "."),
     _rule_body: $ => list($.atom),
 
     constraint: $ => seq(
       "constrain",
+      field("soft", optional(seq("soft", "(", $.integer, ")"))),
       field("captures", optional($.captures)),
       field("kind", $.constraint_kind),
-      field("bound", $.integer),
       field("body", $._rule_body),
       "."
     ),
 
     captures: $ => paren_list($._ident),
 
-    constraint_kind: $ => choice($.cardinality),
+    constraint_kind: $ => choice($.uniform, $.cardinality),
 
+    uniform: _ => "uniform",
     cardinality: $ => seq(
       "cardinality", "to",
       choice($.only, $.at_most, $.at_least),
+      $.integer,
     ),
 
     only: _ => "only",

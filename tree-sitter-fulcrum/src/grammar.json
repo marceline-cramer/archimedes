@@ -9,6 +9,10 @@
         "members": [
           {
             "type": "SYMBOL",
+            "name": "import"
+          },
+          {
+            "type": "SYMBOL",
             "name": "rule"
           },
           {
@@ -61,6 +65,77 @@
         {
           "type": "PATTERN",
           "value": "-?[1-9][0-9]*"
+        }
+      ]
+    },
+    "import": {
+      "type": "SEQ",
+      "members": [
+        {
+          "type": "STRING",
+          "value": "import"
+        },
+        {
+          "type": "SYMBOL",
+          "name": "symbol"
+        },
+        {
+          "type": "REPEAT",
+          "content": {
+            "type": "SEQ",
+            "members": [
+              {
+                "type": "STRING",
+                "value": "."
+              },
+              {
+                "type": "SYMBOL",
+                "name": "symbol"
+              }
+            ]
+          }
+        },
+        {
+          "type": "STRING",
+          "value": "."
+        },
+        {
+          "type": "SEQ",
+          "members": [
+            {
+              "type": "STRING",
+              "value": "("
+            },
+            {
+              "type": "SEQ",
+              "members": [
+                {
+                  "type": "SYMBOL",
+                  "name": "symbol"
+                },
+                {
+                  "type": "REPEAT",
+                  "content": {
+                    "type": "SEQ",
+                    "members": [
+                      {
+                        "type": "STRING",
+                        "value": ","
+                      },
+                      {
+                        "type": "SYMBOL",
+                        "name": "symbol"
+                      }
+                    ]
+                  }
+                }
+              ]
+            },
+            {
+              "type": "STRING",
+              "value": ")"
+            }
+          ]
         }
       ]
     },
@@ -153,6 +228,39 @@
         },
         {
           "type": "FIELD",
+          "name": "soft",
+          "content": {
+            "type": "CHOICE",
+            "members": [
+              {
+                "type": "SEQ",
+                "members": [
+                  {
+                    "type": "STRING",
+                    "value": "soft"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": "("
+                  },
+                  {
+                    "type": "SYMBOL",
+                    "name": "integer"
+                  },
+                  {
+                    "type": "STRING",
+                    "value": ")"
+                  }
+                ]
+              },
+              {
+                "type": "BLANK"
+              }
+            ]
+          }
+        },
+        {
+          "type": "FIELD",
           "name": "captures",
           "content": {
             "type": "CHOICE",
@@ -173,14 +281,6 @@
           "content": {
             "type": "SYMBOL",
             "name": "constraint_kind"
-          }
-        },
-        {
-          "type": "FIELD",
-          "name": "bound",
-          "content": {
-            "type": "SYMBOL",
-            "name": "integer"
           }
         },
         {
@@ -240,9 +340,17 @@
       "members": [
         {
           "type": "SYMBOL",
+          "name": "uniform"
+        },
+        {
+          "type": "SYMBOL",
           "name": "cardinality"
         }
       ]
+    },
+    "uniform": {
+      "type": "STRING",
+      "value": "uniform"
     },
     "cardinality": {
       "type": "SEQ",
@@ -271,6 +379,10 @@
               "name": "at_least"
             }
           ]
+        },
+        {
+          "type": "SYMBOL",
+          "name": "integer"
         }
       ]
     },

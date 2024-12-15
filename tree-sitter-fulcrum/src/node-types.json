@@ -59,7 +59,7 @@
     "named": true,
     "fields": {},
     "children": {
-      "multiple": false,
+      "multiple": true,
       "required": true,
       "types": [
         {
@@ -68,6 +68,10 @@
         },
         {
           "type": "at_most",
+          "named": true
+        },
+        {
+          "type": "integer",
           "named": true
         },
         {
@@ -95,16 +99,6 @@
           }
         ]
       },
-      "bound": {
-        "multiple": false,
-        "required": true,
-        "types": [
-          {
-            "type": "integer",
-            "named": true
-          }
-        ]
-      },
       "captures": {
         "multiple": false,
         "required": false,
@@ -124,6 +118,28 @@
             "named": true
           }
         ]
+      },
+      "soft": {
+        "multiple": true,
+        "required": false,
+        "types": [
+          {
+            "type": "(",
+            "named": false
+          },
+          {
+            "type": ")",
+            "named": false
+          },
+          {
+            "type": "integer",
+            "named": true
+          },
+          {
+            "type": "soft",
+            "named": false
+          }
+        ]
       }
     }
   },
@@ -137,6 +153,10 @@
       "types": [
         {
           "type": "cardinality",
+          "named": true
+        },
+        {
+          "type": "uniform",
           "named": true
         }
       ]
@@ -175,7 +195,26 @@
           "named": true
         },
         {
+          "type": "import",
+          "named": true
+        },
+        {
           "type": "rule",
+          "named": true
+        }
+      ]
+    }
+  },
+  {
+    "type": "import",
+    "named": true,
+    "fields": {},
+    "children": {
+      "multiple": true,
+      "required": true,
+      "types": [
+        {
+          "type": "symbol",
           "named": true
         }
       ]
@@ -307,6 +346,10 @@
     "named": false
   },
   {
+    "type": "import",
+    "named": false
+  },
+  {
     "type": "least",
     "named": false
   },
@@ -319,12 +362,20 @@
     "named": true
   },
   {
+    "type": "soft",
+    "named": false
+  },
+  {
     "type": "symbol",
     "named": true
   },
   {
     "type": "to",
     "named": false
+  },
+  {
+    "type": "uniform",
+    "named": true
   },
   {
     "type": "variable",
