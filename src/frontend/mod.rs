@@ -17,6 +17,7 @@
 // along with Archimedes. If not, see <https://www.gnu.org/licenses/>.
 
 pub mod dataflow;
+pub mod logic;
 pub mod parser;
 pub mod span;
 pub mod types;

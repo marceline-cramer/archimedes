@@ -25,7 +25,6 @@ use differential_dataflow::{
     operators::{arrange::ArrangeBySelf, iterate::Variable, Join, Reduce, Threshold},
     Collection, Hashable,
 };
-use indexmap::IndexMap;
 use timely::{
     communication::Allocate,
     dataflow::{operators::Probe, ProbeHandle, Scope},
@@ -450,70 +449,4 @@ pub struct FrontendOutputs<G: Scope> {
     pub diagnostics: Collection<G, (Url, Diagnostic<Span>)>,
     pub hover: Collection<G, (Url, (Point, (Point, String)))>,
     pub inlay_hints: Collection<G, (Url, InlayHint<Point>)>,
-}
-
-impl<S: Clone, R: Clone, T> Rule<S, R, T> {
-    pub fn base_type(self) -> Option<(R, Spanned<S, Type<S>>)> {
-        if !self.body.is_empty() {
-            return None;
-        }
-
-        let relation = self.head.relation.inner.clone();
-
-        let ty = self
-            .head
-            .inner
-            .pattern
-            .inner
-            .flat_quantify(&mut |_| None)?
-            .map_leaves(&mut |leaf| leaf.ty());
-
-        let ty = Spanned {
-            span: self.head.span.clone(),
-            inner: ty,
-        };
-
-        Some((relation, ty))
-    }
-}
-
-impl<S: Clone> Rule<S, String, String> {
-    pub fn index_variables(self) -> (IndexedRule<S>, Vec<Diagnostic<S>>) {
-        let mut variables = IndexMap::new();
-        let mut diagnostics = Vec::new();
-        let mut body = Vec::new();
-
-        for atom in self.body {
-            let relation = atom.relation.clone();
-
-            let pattern = atom
-                .pattern
-                .clone()
-                .map(|inner| inner.index_variables(&mut variables, &mut diagnostics, false));
-
-            body.push(atom.map(|_| Atom { relation, pattern }));
-        }
-
-        let relation = self.head.relation.clone();
-        let pattern = self
-            .head
-            .pattern
-            .clone()
-            .map(|inner| inner.index_variables(&mut variables, &mut diagnostics, true));
-
-        let variables = variables
-            .into_iter()
-            .map(|(inner, span)| Spanned { inner, span })
-            .collect();
-
-        let indexed = IndexedRule {
-            variables,
-            inner: Rule {
-                head: self.head.map(|_| Atom { relation, pattern }),
-                body,
-            },
-        };
-
-        (indexed, diagnostics)
-    }
 }
