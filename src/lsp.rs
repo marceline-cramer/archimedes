@@ -22,11 +22,13 @@ use std::{
 };
 
 use archimedes::{
-    dataflow::run_dataflow,
-    frontend::{frontend_worker, FrontendResultKind, FrontendUpdate},
-    parser::Module,
-    span::Span,
-    types::ModuleItem,
+    frontend::{
+        dataflow::{frontend_worker, FrontendResultKind, FrontendUpdate},
+        parser::Module,
+        span::Span,
+        types::ModuleItem,
+    },
+    utils::run_dataflow,
 };
 use flume::Sender;
 use tokio::sync::Mutex;

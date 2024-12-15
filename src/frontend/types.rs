@@ -26,7 +26,7 @@ use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::span::{Point, Span, Spanned};
+use crate::frontend::span::{Point, Span, Spanned};
 
 pub type DiagnosticResult<S, T> = Result<T, Diagnostic<S>>;
 

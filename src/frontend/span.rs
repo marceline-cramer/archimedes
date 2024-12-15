@@ -20,7 +20,7 @@ use std::{fmt::Display, ops::Deref};
 
 use serde::{Deserialize, Serialize};
 
-use crate::types::*;
+use crate::frontend::types::*;
 
 impl<S, O> MapSpan<S, O> for InlayHint<S> {
     type Target = InlayHint<O>;

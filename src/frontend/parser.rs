@@ -21,7 +21,7 @@ use std::{fmt::Debug, str::FromStr};
 use tree_sitter::{InputEdit, Node, Parser, Range, Tree, TreeCursor};
 use tree_sitter_fulcrum::LANGUAGE;
 
-use crate::{
+use crate::frontend::{
     span::{MapSpan, Span, Spanless, Spanned},
     types::*,
 };

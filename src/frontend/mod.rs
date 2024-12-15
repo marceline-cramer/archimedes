@@ -16,24 +16,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with Archimedes. If not, see <https://www.gnu.org/licenses/>.
 
-use archimedes::frontend::{parser::Module, span::MapSpan};
-use tower_lsp::{LspService, Server};
-
-pub mod lsp;
-
-#[tokio::main]
-async fn main() {
-    let args: Vec<_> = std::env::args().collect();
-
-    if let Some("parse") = args.get(1).map(String::as_str) {
-        let src = std::fs::read_to_string(&args[2]).unwrap();
-        let module = Module::new(&src);
-        eprintln!("{:#?}", module.items().map_span(&mut |_| ()));
-        return;
-    }
-
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-    let (service, socket) = LspService::new(lsp::LspBackend::new);
-    Server::new(stdin, stdout, socket).serve(service).await;
-}
+pub mod dataflow;
+pub mod parser;
+pub mod span;
+pub mod types;

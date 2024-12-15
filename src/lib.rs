@@ -16,8 +16,5 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with Archimedes. If not, see <https://www.gnu.org/licenses/>.
 
-pub mod dataflow;
 pub mod frontend;
-pub mod parser;
-pub mod span;
-pub mod types;
+pub mod utils;

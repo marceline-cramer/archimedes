@@ -35,9 +35,11 @@ use timely::{
 use url::Url;
 
 use crate::{
-    dataflow::*,
-    span::{MapSpan, Point, Span, Spanned},
-    types::*,
+    frontend::{
+        span::{MapSpan, Point, Span, Spanned},
+        types::*,
+    },
+    utils::*,
 };
 
 pub fn frontend<G: Input>(inputs: FrontendInputs<G>) -> FrontendOutputs<G>
