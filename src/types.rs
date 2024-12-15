@@ -25,7 +25,7 @@ use differential_dataflow::Hashable;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
 
-use crate::span::{MapSpan, Point, Span, Spanned};
+use crate::span::{Point, Span, Spanned};
 
 pub type DiagnosticResult<S, T> = Result<T, Diagnostic<S>>;
 
@@ -104,59 +104,37 @@ pub enum DiagnosticKind {
     Note,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, Hash)]
-pub enum ModuleItem<S, T> {
-    Rule(Rule<S, T>),
-    Decision(Decision<S, T>),
-    Constraint(Constraint<S, T>),
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+pub enum ModuleItem<S, R, T> {
+    Rule(Rule<S, R, T>),
+    Decision(Decision<S, R, T>),
+    Constraint(Constraint<S, R, T>),
     Diagnostic(Diagnostic<S>),
 }
 
-pub struct ModuleItems<S, T> {
-    pub rules: Vec<Rule<S, T>>,
-    pub decisions: Vec<Decision<S, T>>,
-    pub constraints: Vec<Constraint<S, T>>,
-    pub diagnostics: Vec<Diagnostic<S>>,
-}
+impl<S, R, T> ModuleItem<S, R, T> {
+    pub fn rule<C>((ctx, item): (C, Self)) -> Option<(C, Rule<S, R, T>)> {
+        match item {
+            ModuleItem::Rule(r) => Some((ctx, r)),
+            _ => None,
+        }
+    }
 
-impl<S, O, T> MapSpan<S, O> for ModuleItems<S, T>
-where
-    T: MapSpan<S, O>,
-{
-    type Target = ModuleItems<O, T::Target>;
-
-    fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
-        ModuleItems {
-            rules: self.rules.map_span(cb),
-            decisions: self.decisions.map_span(cb),
-            constraints: self.constraints.map_span(cb),
-            diagnostics: self.diagnostics.map_span(cb),
+    pub fn diagnostic<C>((ctx, item): (C, Self)) -> Option<(C, Diagnostic<S>)> {
+        match item {
+            ModuleItem::Diagnostic(d) => Some((ctx, d)),
+            _ => None,
         }
     }
 }
 
-impl<S, T> ModuleItems<S, T> {
-    pub fn to_vec(self) -> Vec<ModuleItem<S, T>> {
-        let rules = self.rules.into_iter().map(ModuleItem::Rule);
-        let decisions = self.decisions.into_iter().map(ModuleItem::Decision);
-        let constraints = self.constraints.into_iter().map(ModuleItem::Constraint);
-        let diagnostics = self.diagnostics.into_iter().map(ModuleItem::Diagnostic);
-
-        rules
-            .chain(decisions)
-            .chain(constraints)
-            .chain(diagnostics)
-            .collect()
-    }
-}
-
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub struct Decision<S, T>(pub Rule<S, T>);
+pub struct Decision<S, R, T>(pub Rule<S, R, T>);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct IndexedRule<S> {
     pub variables: Vec<Spanned<S, String>>,
-    pub inner: Rule<S, usize>,
+    pub inner: Rule<S, String, usize>,
 }
 
 impl<S> IndexedRule<S> {
@@ -183,13 +161,13 @@ impl<S> IndexedRule<S> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub struct Rule<S, T> {
-    pub head: Spanned<S, Atom<S, Term<S, T>>>,
-    pub body: Vec<Spanned<S, Atom<S, Term<S, T>>>>,
+pub struct Rule<S, R, T> {
+    pub head: Spanned<S, Atom<S, R, Term<S, T>>>,
+    pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
 }
 
-impl<S: Clone, T> Rule<S, T> {
-    pub fn base_type(self) -> Option<(String, Spanned<S, Type<S>>)> {
+impl<S: Clone, R: Clone, T> Rule<S, R, T> {
+    pub fn base_type(self) -> Option<(R, Spanned<S, Type<S>>)> {
         if !self.body.is_empty() {
             return None;
         }
@@ -213,7 +191,7 @@ impl<S: Clone, T> Rule<S, T> {
     }
 }
 
-impl<S: Clone> Rule<S, String> {
+impl<S: Clone> Rule<S, String, String> {
     pub fn index_variables(self) -> (IndexedRule<S>, Vec<Diagnostic<S>>) {
         let mut variables = IndexMap::new();
         let mut diagnostics = Vec::new();
@@ -255,11 +233,11 @@ impl<S: Clone> Rule<S, String> {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub struct Constraint<S, T> {
+pub struct Constraint<S, R, T> {
     pub captures: Vec<Spanned<S, String>>,
     pub kind: Spanned<S, ConstraintKind>,
     pub bound: Spanned<S, i64>,
-    pub body: Vec<Spanned<S, Atom<S, T>>>,
+    pub body: Vec<Spanned<S, Atom<S, R, T>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
@@ -270,8 +248,8 @@ pub enum ConstraintKind {
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub struct Atom<S, T> {
-    pub relation: Spanned<S, String>,
+pub struct Atom<S, R, T> {
+    pub relation: Spanned<S, R>,
     pub pattern: Spanned<S, Pattern<S, T>>,
 }
 

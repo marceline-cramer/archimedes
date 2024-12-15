@@ -159,7 +159,7 @@ pub struct File {
     client: Client,
     module: Module,
     url: Url,
-    old_items: HashSet<ModuleItem<Span, String>>,
+    old_items: HashSet<ModuleItem<Span, String, String>>,
     update_tx: Sender<Vec<FrontendUpdate>>,
     inlay_hints: Vec<InlayHint>,
 }
@@ -194,7 +194,7 @@ impl File {
         self.module.update(&params.text);
 
         let items = self.module.items();
-        let new_items: HashSet<_> = items.to_vec().into_iter().collect();
+        let new_items: HashSet<_> = items.iter().cloned().collect();
 
         let removed = self
             .old_items
@@ -207,16 +207,7 @@ impl File {
 
         let mut updates = Vec::new();
         for (el, added) in removed.chain(added) {
-            let url = self.url.clone();
-
-            let update = match el.clone() {
-                ModuleItem::Rule(el) => FrontendUpdate::Rule(url, el, added),
-                ModuleItem::Decision(el) => FrontendUpdate::Decision(url, el, added),
-                ModuleItem::Constraint(el) => FrontendUpdate::Constraint(url, el, added),
-                ModuleItem::Diagnostic(el) => FrontendUpdate::Diagnostic(url, el, added),
-            };
-
-            updates.push(update);
+            updates.push(FrontendUpdate::Item(self.url.clone(), el.clone(), added));
         }
 
         if !updates.is_empty() {

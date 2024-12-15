@@ -43,18 +43,12 @@ pub fn frontend_worker<A: Allocate>(
     worker: &mut Worker<A>,
 ) -> (FrontendWorkerInput, FrontendWorkerOutput) {
     let mut input = FrontendWorkerInput {
-        rules: InputSession::new(),
-        constraints: InputSession::new(),
-        decisions: InputSession::new(),
-        diagnostics: InputSession::new(),
+        items: InputSession::new(),
     };
 
     let output = worker.dataflow(|scope| {
         let inputs = FrontendInputs {
-            rules: input.rules.to_collection(scope),
-            constraints: input.constraints.to_collection(scope),
-            decisions: input.decisions.to_collection(scope),
-            diagnostics: input.diagnostics.to_collection(scope),
+            items: input.items.to_collection(scope),
         };
 
         let outputs = frontend(inputs);
@@ -79,20 +73,14 @@ pub fn frontend_worker<A: Allocate>(
 }
 
 pub struct FrontendWorkerInput {
-    pub rules: InputSession<(Url, Rule<Span, String>)>,
-    pub constraints: InputSession<(Url, Constraint<Span, String>)>,
-    pub decisions: InputSession<(Url, Decision<Span, String>)>,
-    pub diagnostics: InputSession<(Url, Diagnostic<Span>)>,
+    pub items: InputSession<(Url, ModuleItem<Span, String, String>)>,
 }
 
 impl WorkerInput for FrontendWorkerInput {
     type Update = FrontendUpdate;
 
     fn advance_to(&mut self, time: Time) {
-        self.rules.advance_to(time);
-        self.constraints.advance_to(time);
-        self.decisions.advance_to(time);
-        self.diagnostics.advance_to(time);
+        self.items.advance_to(time);
     }
 
     fn on_update(&mut self, update: Self::Update) {
@@ -100,27 +88,18 @@ impl WorkerInput for FrontendWorkerInput {
 
         use FrontendUpdate::*;
         match update {
-            Rule(url, el, add) => self.rules.update((url, el), diff(add)),
-            Constraint(url, el, add) => self.constraints.update((url, el), diff(add)),
-            Decision(url, el, add) => self.decisions.update((url, el), diff(add)),
-            Diagnostic(url, el, add) => self.diagnostics.update((url, el), diff(add)),
+            Item(url, el, add) => self.items.update((url, el), diff(add)),
         }
     }
 
     fn flush(&mut self) {
-        self.rules.flush();
-        self.constraints.flush();
-        self.decisions.flush();
-        self.diagnostics.flush();
+        self.items.flush();
     }
 }
 
 #[derive(Clone, Debug)]
 pub enum FrontendUpdate {
-    Rule(Url, Rule<Span, String>, bool),
-    Constraint(Url, Constraint<Span, String>, bool),
-    Decision(Url, Decision<Span, String>, bool),
-    Diagnostic(Url, Diagnostic<Span>, bool),
+    Item(Url, ModuleItem<Span, String, String>, bool),
 }
 
 pub struct FrontendWorkerOutput {
@@ -183,21 +162,27 @@ pub fn frontend<G: Input>(inputs: FrontendInputs<G>) -> FrontendOutputs<G>
 where
     G::Timestamp: Lattice,
 {
-    let mut scope = inputs.rules.scope();
+    let mut scope = inputs.items.scope();
     let unspanned = inputs.clone().unspan();
     let hover = scope.new_collection().1;
 
-    let indexed_rules = unspanned.rules.map(Rule::index_variables);
-    let diagnostics = indexed_rules.flat_map(value).consolidate();
-    let indexed_rules = indexed_rules.map(key);
+    let indexed_rules = unspanned
+        .items
+        .flat_map(|r| ModuleItem::rule(((), r)))
+        .map(value)
+        .map(Rule::index_variables);
 
-    let base_types = inputs.rules.flat_map(|(url, rule)| {
+    let diagnostics = indexed_rules.flat_map(value).consolidate();
+
+    let rules = inputs.items.flat_map(ModuleItem::rule);
+
+    let base_types = rules.flat_map(|(url, rule)| {
         rule.clone()
             .base_type()
             .map(|(relation, ty)| ((url, relation), ty))
     });
 
-    let rule_keys = inputs.rules.identifiers().map(|(rule, key)| (key, rule));
+    let rule_keys = rules.identifiers().map(|(rule, key)| (key, rule));
 
     let head_types = rule_keys.flat_map(|(key, (url, rule))| {
         // TODO: this actually would replace the work of base_types if unblocked
@@ -389,7 +374,7 @@ where
         .map(|d| (d.span, d))
         .join(&unspanned.spans)
         .map(|(_key, (d, (url, span)))| (url, d.with_span(span)))
-        .concat(&inputs.diagnostics)
+        .concat(&inputs.items.flat_map(ModuleItem::diagnostic))
         .concat(&type_diagnostics)
         .distinct();
 
@@ -404,10 +389,7 @@ where
 
 #[derive(Clone)]
 pub struct FrontendInputs<G: Scope> {
-    pub rules: Collection<G, (Url, Rule<Span, String>)>,
-    pub constraints: Collection<G, (Url, Constraint<Span, String>)>,
-    pub decisions: Collection<G, (Url, Decision<Span, String>)>,
-    pub diagnostics: Collection<G, (Url, Diagnostic<Span>)>,
+    pub items: Collection<G, (Url, ModuleItem<Span, String, String>)>,
 }
 
 pub type SpanKey = (u64, usize);
@@ -447,29 +429,18 @@ where
     G::Timestamp: Lattice,
 {
     pub fn unspan(self) -> FrontendUnspanned<G> {
-        let rules = self.rules.map(indirect_spans);
-        let constraints = self.constraints.map(indirect_spans);
-        let decisions = self.decisions.map(indirect_spans);
-
-        let spans = rules
-            .flat_map(key)
-            .concat(&constraints.flat_map(key))
-            .concat(&decisions.flat_map(key))
-            .distinct();
+        let items = self.items.map(indirect_spans);
+        let spans = items.flat_map(key).distinct();
 
         FrontendUnspanned {
-            rules: rules.map(value),
-            constraints: constraints.map(value),
-            decisions: decisions.map(value),
+            items: items.map(value),
             spans,
         }
     }
 }
 
 pub struct FrontendUnspanned<G: Scope> {
-    pub rules: Collection<G, Rule<SpanKey, String>>,
-    pub constraints: Collection<G, Constraint<SpanKey, String>>,
-    pub decisions: Collection<G, Decision<SpanKey, String>>,
+    pub items: Collection<G, ModuleItem<SpanKey, String, String>>,
     pub spans: Collection<G, (SpanKey, (Url, Span))>,
 }
 

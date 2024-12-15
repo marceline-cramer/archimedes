@@ -52,11 +52,9 @@ impl Module {
         self.tree = self.parser.parse(src, Some(&self.tree)).unwrap();
     }
 
-    pub fn items(&self) -> ModuleItems<Span, String> {
-        let mut diagnostics = Vec::new();
-        let mut rules = Vec::new();
-        let mut decisions = Vec::new();
+    pub fn items(&self) -> Vec<ModuleItem<Span, String, String>> {
         let mut cursor = self.tree.walk();
+        let mut items = Vec::new();
         for node in cursor.node().children(&mut cursor) {
             if node.has_error() {
                 let mut stack = vec![node];
@@ -65,11 +63,11 @@ impl Module {
                     stack.extend(node.children(&mut cursor).filter(|node| node.has_error()));
 
                     if node.is_error() {
-                        diagnostics.push(Diagnostic {
+                        items.push(ModuleItem::Diagnostic(Diagnostic {
                             span: node.range(),
                             kind: DiagnosticKind::Error,
                             contents: "Syntax error".to_string(),
-                        });
+                        }));
                     }
                 }
 
@@ -78,30 +76,32 @@ impl Module {
 
             let mut cursor = node.walk();
             match node.kind() {
-                "rule" => rules.push(Rule::parse(&self.src, &node, &mut cursor)),
-                "decision" => decisions.push(Decision::parse(&self.src, &node, &mut cursor)),
+                "rule" => items.push(ModuleItem::Rule(Parse::parse(
+                    &self.src,
+                    &node,
+                    &mut cursor,
+                ))),
+                "decision" => items.push(ModuleItem::Decision(Parse::parse(
+                    &self.src,
+                    &node,
+                    &mut cursor,
+                ))),
                 "comment" | "constraint" => continue,
                 other => unimplemented!("unexpected node {other:?}"),
             }
         }
 
-        ModuleItems {
-            rules,
-            decisions,
-            constraints: Default::default(),
-            diagnostics,
-        }
-        .map_span(&mut |range| range.into())
+        items.map_span(&mut |range| range.into())
     }
 }
 
-impl Parse for Decision<Range, String> {
+impl Parse for Decision<Range, String, String> {
     fn parse<'tree>(src: &str, node: &Node<'tree>, cursor: &mut TreeCursor<'tree>) -> Self {
         Self(Parse::parse(src, &node.named_child(0).unwrap(), cursor))
     }
 }
 
-impl Parse for Rule<Range, String> {
+impl Parse for Rule<Range, String, String> {
     fn parse<'tree>(src: &str, node: &Node<'tree>, cursor: &mut TreeCursor<'tree>) -> Self {
         let head = Parse::parse(src, &node.child_by_field_name("head").unwrap(), cursor);
 
@@ -119,13 +119,13 @@ impl Parse for Rule<Range, String> {
     }
 }
 
-impl Parse for Constraint<Range, String> {
+impl Parse for Constraint<Range, String, String> {
     fn parse(src: &str, node: &Node, cursor: &mut TreeCursor) -> Self {
         todo!()
     }
 }
 
-impl Parse for Atom<Range, Term<Range, String>> {
+impl Parse for Atom<Range, String, Term<Range, String>> {
     fn parse<'tree>(src: &str, node: &Node<'tree>, cursor: &mut TreeCursor<'tree>) -> Self {
         let relation_node = node.child_by_field_name("relation").unwrap();
         let relation = Parse::parse(src, &relation_node, cursor);

@@ -45,22 +45,42 @@ impl<S, O> MapSpan<S, O> for Diagnostic<S> {
     }
 }
 
-impl<S, O, T> MapSpan<S, O> for Decision<S, T>
+impl<S, O, R, T> MapSpan<S, O> for ModuleItem<S, R, T>
 where
+    R: MapSpan<S, O>,
     T: MapSpan<S, O>,
 {
-    type Target = Decision<O, T::Target>;
+    type Target = ModuleItem<O, R::Target, T::Target>;
+
+    fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
+        use ModuleItem::*;
+        match self {
+            Rule(el) => Rule(el.map_span(cb)),
+            Decision(el) => Decision(el.map_span(cb)),
+            Constraint(el) => Constraint(el.map_span(cb)),
+            Diagnostic(el) => Diagnostic(el.map_span(cb)),
+        }
+    }
+}
+
+impl<S, O, R, T> MapSpan<S, O> for Decision<S, R, T>
+where
+    R: MapSpan<S, O>,
+    T: MapSpan<S, O>,
+{
+    type Target = Decision<O, R::Target, T::Target>;
 
     fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
         Decision(self.0.map_span(cb))
     }
 }
 
-impl<S, O, T> MapSpan<S, O> for Rule<S, T>
+impl<S, O, R, T> MapSpan<S, O> for Rule<S, R, T>
 where
+    R: MapSpan<S, O>,
     T: MapSpan<S, O>,
 {
-    type Target = Rule<O, T::Target>;
+    type Target = Rule<O, R::Target, T::Target>;
 
     fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
         let head = self.head.map_span(cb);
@@ -69,11 +89,12 @@ where
     }
 }
 
-impl<S, O, T> MapSpan<S, O> for Constraint<S, T>
+impl<S, O, R, T> MapSpan<S, O> for Constraint<S, R, T>
 where
+    R: MapSpan<S, O>,
     T: MapSpan<S, O>,
 {
-    type Target = Constraint<O, T::Target>;
+    type Target = Constraint<O, R::Target, T::Target>;
 
     fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
         let captures = self.captures.map_span(cb);
@@ -92,11 +113,12 @@ where
 
 impl Spanless for ConstraintKind {}
 
-impl<S, O, T> MapSpan<S, O> for Atom<S, T>
+impl<S, O, R, T> MapSpan<S, O> for Atom<S, R, T>
 where
+    R: MapSpan<S, O>,
     T: MapSpan<S, O>,
 {
-    type Target = Atom<O, T::Target>;
+    type Target = Atom<O, R::Target, T::Target>;
 
     fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
         let relation = self.relation.map_span(cb);
