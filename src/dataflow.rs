@@ -20,14 +20,16 @@ use std::{
     collections::{HashMap, HashSet},
     fmt::Debug,
     hash::Hash,
+    marker::PhantomData,
 };
 
 use differential_dataflow::{
     input::Input,
     trace::{Cursor, TraceReader},
-    Collection, Data,
+    Collection, Data, Hashable,
 };
 use flume::{Receiver, Sender};
+use serde::{Deserialize, Serialize};
 use timely::{
     communication::{Allocate, Allocator},
     container::flatcontainer::IntoOwned,
@@ -357,5 +359,18 @@ impl<T, K, V> TraceMap<T, K, V> {
             inner: HashSet::new(),
             trace,
         }
+    }
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+pub struct Key<T>(u64, PhantomData<T>);
+
+impl<T: Hashable<Output = u64>> Key<T> {
+    pub fn new(data: &T) -> Self {
+        Key(data.hashed(), PhantomData)
+    }
+
+    pub fn pair(data: T) -> (Self, T) {
+        (Self::new(&data), data)
     }
 }

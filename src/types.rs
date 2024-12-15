@@ -24,6 +24,7 @@ use std::{
 use differential_dataflow::Hashable;
 use indexmap::{IndexMap, IndexSet};
 use serde::{Deserialize, Serialize};
+use url::Url;
 
 use crate::span::{Point, Span, Spanned};
 
@@ -164,72 +165,6 @@ impl<S> IndexedRule<S> {
 pub struct Rule<S, R, T> {
     pub head: Spanned<S, Atom<S, R, Term<S, T>>>,
     pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
-}
-
-impl<S: Clone, R: Clone, T> Rule<S, R, T> {
-    pub fn base_type(self) -> Option<(R, Spanned<S, Type<S>>)> {
-        if !self.body.is_empty() {
-            return None;
-        }
-
-        let relation = self.head.relation.inner.clone();
-
-        let ty = self
-            .head
-            .inner
-            .pattern
-            .inner
-            .flat_quantify(&mut |_| None)?
-            .map_leaves(&mut |leaf| leaf.ty());
-
-        let ty = Spanned {
-            span: self.head.span.clone(),
-            inner: ty,
-        };
-
-        Some((relation, ty))
-    }
-}
-
-impl<S: Clone> Rule<S, String, String> {
-    pub fn index_variables(self) -> (IndexedRule<S>, Vec<Diagnostic<S>>) {
-        let mut variables = IndexMap::new();
-        let mut diagnostics = Vec::new();
-        let mut body = Vec::new();
-
-        for atom in self.body {
-            let relation = atom.relation.clone();
-
-            let pattern = atom
-                .pattern
-                .clone()
-                .map(|inner| inner.index_variables(&mut variables, &mut diagnostics, false));
-
-            body.push(atom.map(|_| Atom { relation, pattern }));
-        }
-
-        let relation = self.head.relation.clone();
-        let pattern = self
-            .head
-            .pattern
-            .clone()
-            .map(|inner| inner.index_variables(&mut variables, &mut diagnostics, true));
-
-        let variables = variables
-            .into_iter()
-            .map(|(inner, span)| Spanned { inner, span })
-            .collect();
-
-        let indexed = IndexedRule {
-            variables,
-            inner: Rule {
-                head: self.head.map(|_| Atom { relation, pattern }),
-                body,
-            },
-        };
-
-        (indexed, diagnostics)
-    }
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
@@ -525,4 +460,9 @@ impl Display for PrimitiveType {
             PrimitiveType::Integer => write!(f, "Integer"),
         }
     }
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+pub enum ResourceId {
+    Module(Url, String),
 }

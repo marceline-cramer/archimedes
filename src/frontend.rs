@@ -25,6 +25,7 @@ use differential_dataflow::{
     operators::{arrange::ArrangeBySelf, iterate::Variable, Join, Reduce, Threshold},
     Collection, Hashable,
 };
+use indexmap::IndexMap;
 use timely::{
     communication::Allocate,
     dataflow::{operators::Probe, ProbeHandle, Scope},
@@ -38,125 +39,6 @@ use crate::{
     span::{MapSpan, Point, Span, Spanned},
     types::*,
 };
-
-pub fn frontend_worker<A: Allocate>(
-    worker: &mut Worker<A>,
-) -> (FrontendWorkerInput, FrontendWorkerOutput) {
-    let mut input = FrontendWorkerInput {
-        items: InputSession::new(),
-    };
-
-    let output = worker.dataflow(|scope| {
-        let inputs = FrontendInputs {
-            items: input.items.to_collection(scope),
-        };
-
-        let outputs = frontend(inputs);
-
-        let diagnostics = outputs.diagnostics.arrange_by_self();
-        let hover = outputs.hover.arrange_by_self();
-        let inlay_hints = outputs.inlay_hints.arrange_by_self();
-
-        FrontendWorkerOutput {
-            probes: vec![
-                diagnostics.stream.probe(),
-                hover.stream.probe(),
-                inlay_hints.stream.probe(),
-            ],
-            diagnostics: Box::new(TraceMap::new(diagnostics.trace)),
-            hover: Box::new(TraceMap::new(hover.trace)),
-            inlay_hints: Box::new(TraceMap::new(inlay_hints.trace)),
-        }
-    });
-
-    (input, output)
-}
-
-pub struct FrontendWorkerInput {
-    pub items: InputSession<(Url, ModuleItem<Span, String, String>)>,
-}
-
-impl WorkerInput for FrontendWorkerInput {
-    type Update = FrontendUpdate;
-
-    fn advance_to(&mut self, time: Time) {
-        self.items.advance_to(time);
-    }
-
-    fn on_update(&mut self, update: Self::Update) {
-        let diff = |add| if add { 1 } else { -1 };
-
-        use FrontendUpdate::*;
-        match update {
-            Item(url, el, add) => self.items.update((url, el), diff(add)),
-        }
-    }
-
-    fn flush(&mut self) {
-        self.items.flush();
-    }
-}
-
-#[derive(Clone, Debug)]
-pub enum FrontendUpdate {
-    Item(Url, ModuleItem<Span, String, String>, bool),
-}
-
-pub struct FrontendWorkerOutput {
-    pub probes: Vec<ProbeHandle<Time>>,
-    pub diagnostics: Box<dyn DynTraceMap<(Url, Diagnostic<Span>), ()>>,
-    pub inlay_hints: Box<dyn DynTraceMap<(Url, InlayHint<Point>), ()>>,
-    pub hover: Box<dyn DynTraceMap<(Url, (Point, (Point, String))), ()>>,
-}
-
-impl WorkerOutput for FrontendWorkerOutput {
-    type Result = FrontendResult;
-
-    fn advance_to(&mut self, time: Time) {
-        self.diagnostics.advance_to(time);
-        self.hover.advance_to(time);
-        self.inlay_hints.advance_to(time);
-    }
-
-    fn pending(&self, time: &Time) -> bool {
-        self.probes.iter().any(|probe| probe.less_than(time))
-    }
-
-    fn results(&mut self) -> Vec<Self::Result> {
-        self.diagnostics.update();
-        self.hover.update();
-        self.inlay_hints.update();
-
-        let diagnostics = self
-            .diagnostics
-            .distinct_keys()
-            .into_iter()
-            .map(|(url, diag)| (url, FrontendResultKind::Diagnostic(diag)));
-
-        let hover = self
-            .hover
-            .distinct_keys()
-            .into_iter()
-            .map(|(url, hover)| (url, FrontendResultKind::Hover(hover)));
-
-        let inlay_hints = self
-            .inlay_hints
-            .distinct_keys()
-            .into_iter()
-            .map(|(url, hint)| (url, FrontendResultKind::InlayHint(hint)));
-
-        diagnostics.chain(hover).chain(inlay_hints).collect()
-    }
-}
-
-pub type FrontendResult = (Url, FrontendResultKind);
-
-#[derive(Clone, Debug)]
-pub enum FrontendResultKind {
-    Diagnostic(Diagnostic<Span>),
-    InlayHint(InlayHint<Point>),
-    Hover((Point, (Point, String))),
-}
 
 pub fn frontend<G: Input>(inputs: FrontendInputs<G>) -> FrontendOutputs<G>
 where
@@ -176,11 +58,10 @@ where
 
     let rules = inputs.items.flat_map(ModuleItem::rule);
 
-    let base_types = rules.flat_map(|(url, rule)| {
-        rule.clone()
-            .base_type()
-            .map(|(relation, ty)| ((url, relation), ty))
-    });
+    let base_types = inputs
+        .items
+        .flat_map(ModuleItem::rule)
+        .flat_map(|(url, rule)| rule.base_type().map(|(relation, ty)| ((url, relation), ty)));
 
     let rule_keys = rules.identifiers().map(|(rule, key)| (key, rule));
 
@@ -387,6 +268,125 @@ where
     }
 }
 
+pub fn frontend_worker<A: Allocate>(
+    worker: &mut Worker<A>,
+) -> (FrontendWorkerInput, FrontendWorkerOutput) {
+    let mut input = FrontendWorkerInput {
+        items: InputSession::new(),
+    };
+
+    let output = worker.dataflow(|scope| {
+        let inputs = FrontendInputs {
+            items: input.items.to_collection(scope),
+        };
+
+        let outputs = frontend(inputs);
+
+        let diagnostics = outputs.diagnostics.arrange_by_self();
+        let hover = outputs.hover.arrange_by_self();
+        let inlay_hints = outputs.inlay_hints.arrange_by_self();
+
+        FrontendWorkerOutput {
+            probes: vec![
+                diagnostics.stream.probe(),
+                hover.stream.probe(),
+                inlay_hints.stream.probe(),
+            ],
+            diagnostics: Box::new(TraceMap::new(diagnostics.trace)),
+            hover: Box::new(TraceMap::new(hover.trace)),
+            inlay_hints: Box::new(TraceMap::new(inlay_hints.trace)),
+        }
+    });
+
+    (input, output)
+}
+
+pub struct FrontendWorkerInput {
+    pub items: InputSession<(Url, ModuleItem<Span, String, String>)>,
+}
+
+impl WorkerInput for FrontendWorkerInput {
+    type Update = FrontendUpdate;
+
+    fn advance_to(&mut self, time: Time) {
+        self.items.advance_to(time);
+    }
+
+    fn on_update(&mut self, update: Self::Update) {
+        let diff = |add| if add { 1 } else { -1 };
+
+        use FrontendUpdate::*;
+        match update {
+            Item(url, el, add) => self.items.update((url, el), diff(add)),
+        }
+    }
+
+    fn flush(&mut self) {
+        self.items.flush();
+    }
+}
+
+#[derive(Clone, Debug)]
+pub enum FrontendUpdate {
+    Item(Url, ModuleItem<Span, String, String>, bool),
+}
+
+pub struct FrontendWorkerOutput {
+    pub probes: Vec<ProbeHandle<Time>>,
+    pub diagnostics: Box<dyn DynTraceMap<(Url, Diagnostic<Span>), ()>>,
+    pub inlay_hints: Box<dyn DynTraceMap<(Url, InlayHint<Point>), ()>>,
+    pub hover: Box<dyn DynTraceMap<(Url, (Point, (Point, String))), ()>>,
+}
+
+impl WorkerOutput for FrontendWorkerOutput {
+    type Result = FrontendResult;
+
+    fn advance_to(&mut self, time: Time) {
+        self.diagnostics.advance_to(time);
+        self.hover.advance_to(time);
+        self.inlay_hints.advance_to(time);
+    }
+
+    fn pending(&self, time: &Time) -> bool {
+        self.probes.iter().any(|probe| probe.less_than(time))
+    }
+
+    fn results(&mut self) -> Vec<Self::Result> {
+        self.diagnostics.update();
+        self.hover.update();
+        self.inlay_hints.update();
+
+        let diagnostics = self
+            .diagnostics
+            .distinct_keys()
+            .into_iter()
+            .map(|(url, diag)| (url, FrontendResultKind::Diagnostic(diag)));
+
+        let hover = self
+            .hover
+            .distinct_keys()
+            .into_iter()
+            .map(|(url, hover)| (url, FrontendResultKind::Hover(hover)));
+
+        let inlay_hints = self
+            .inlay_hints
+            .distinct_keys()
+            .into_iter()
+            .map(|(url, hint)| (url, FrontendResultKind::InlayHint(hint)));
+
+        diagnostics.chain(hover).chain(inlay_hints).collect()
+    }
+}
+
+pub type FrontendResult = (Url, FrontendResultKind);
+
+#[derive(Clone, Debug)]
+pub enum FrontendResultKind {
+    Diagnostic(Diagnostic<Span>),
+    InlayHint(InlayHint<Point>),
+    Hover((Point, (Point, String))),
+}
+
 #[derive(Clone)]
 pub struct FrontendInputs<G: Scope> {
     pub items: Collection<G, (Url, ModuleItem<Span, String, String>)>,
@@ -448,4 +448,70 @@ pub struct FrontendOutputs<G: Scope> {
     pub diagnostics: Collection<G, (Url, Diagnostic<Span>)>,
     pub hover: Collection<G, (Url, (Point, (Point, String)))>,
     pub inlay_hints: Collection<G, (Url, InlayHint<Point>)>,
+}
+
+impl<S: Clone, R: Clone, T> Rule<S, R, T> {
+    pub fn base_type(self) -> Option<(R, Spanned<S, Type<S>>)> {
+        if !self.body.is_empty() {
+            return None;
+        }
+
+        let relation = self.head.relation.inner.clone();
+
+        let ty = self
+            .head
+            .inner
+            .pattern
+            .inner
+            .flat_quantify(&mut |_| None)?
+            .map_leaves(&mut |leaf| leaf.ty());
+
+        let ty = Spanned {
+            span: self.head.span.clone(),
+            inner: ty,
+        };
+
+        Some((relation, ty))
+    }
+}
+
+impl<S: Clone> Rule<S, String, String> {
+    pub fn index_variables(self) -> (IndexedRule<S>, Vec<Diagnostic<S>>) {
+        let mut variables = IndexMap::new();
+        let mut diagnostics = Vec::new();
+        let mut body = Vec::new();
+
+        for atom in self.body {
+            let relation = atom.relation.clone();
+
+            let pattern = atom
+                .pattern
+                .clone()
+                .map(|inner| inner.index_variables(&mut variables, &mut diagnostics, false));
+
+            body.push(atom.map(|_| Atom { relation, pattern }));
+        }
+
+        let relation = self.head.relation.clone();
+        let pattern = self
+            .head
+            .pattern
+            .clone()
+            .map(|inner| inner.index_variables(&mut variables, &mut diagnostics, true));
+
+        let variables = variables
+            .into_iter()
+            .map(|(inner, span)| Spanned { inner, span })
+            .collect();
+
+        let indexed = IndexedRule {
+            variables,
+            inner: Rule {
+                head: self.head.map(|_| Atom { relation, pattern }),
+                body,
+            },
+        };
+
+        (indexed, diagnostics)
+    }
 }
