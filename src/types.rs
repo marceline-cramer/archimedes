@@ -237,11 +237,16 @@ pub struct Constraint<S, R, T> {
     pub captures: Vec<Spanned<S, String>>,
     pub kind: Spanned<S, ConstraintKind>,
     pub bound: Spanned<S, i64>,
-    pub body: Vec<Spanned<S, Atom<S, R, T>>>,
+    pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub enum ConstraintKind {
+    Cardinality(CardinalityConstraintKind),
+}
+
+#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+pub enum CardinalityConstraintKind {
     Only,
     AtMost,
     AtLeast,

@@ -86,7 +86,12 @@ impl Module {
                     &node,
                     &mut cursor,
                 ))),
-                "comment" | "constraint" => continue,
+                "constraint" => items.push(ModuleItem::Constraint(Parse::parse(
+                    &self.src,
+                    &node,
+                    &mut cursor,
+                ))),
+                "comment" => continue,
                 other => unimplemented!("unexpected node {other:?}"),
             }
         }
@@ -120,8 +125,62 @@ impl Parse for Rule<Range, String, String> {
 }
 
 impl Parse for Constraint<Range, String, String> {
-    fn parse(src: &str, node: &Node, cursor: &mut TreeCursor) -> Self {
-        todo!()
+    fn parse<'tree>(src: &str, node: &Node<'tree>, cursor: &mut TreeCursor<'tree>) -> Self {
+        let captures = node
+            .child_by_field_name("captures")
+            .map(|node| Parse::parse(src, &node, cursor))
+            .unwrap_or_default();
+
+        let kind = node
+            .child_by_field_name("kind")
+            .map(|node| Parse::parse(src, &node, cursor))
+            .unwrap();
+
+        let bound = node
+            .child_by_field_name("bound")
+            .map(|node| Parse::parse(src, &node, cursor))
+            .unwrap();
+
+        let body: Vec<_> = node
+            .children_by_field_name("body", cursor)
+            .filter(|node| node.is_named())
+            .collect();
+
+        let body = body
+            .into_iter()
+            .map(|node| Parse::parse(src, &node, cursor))
+            .collect();
+
+        Self {
+            captures,
+            kind,
+            bound,
+            body,
+        }
+    }
+}
+
+impl Parse for ConstraintKind {
+    fn parse<'tree>(src: &str, node: &Node<'tree>, cursor: &mut TreeCursor<'tree>) -> Self {
+        use ConstraintKind::*;
+        let node = node.named_child(0).unwrap();
+        match node.kind() {
+            "cardinality" => Cardinality(Parse::parse(src, &node, cursor)),
+            other => unreachable!("unexpected node kind {other:?}"),
+        }
+    }
+}
+
+impl Parse for CardinalityConstraintKind {
+    fn parse<'tree>(_src: &str, node: &Node<'tree>, _cursor: &mut TreeCursor<'tree>) -> Self {
+        use CardinalityConstraintKind::*;
+        let node = node.named_child(0).unwrap();
+        match node.kind() {
+            "only" => Only,
+            "at_most" => AtMost,
+            "at_least" => AtLeast,
+            other => unreachable!("unexpected node kind {other:?}"),
+        }
     }
 }
 

@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with Archimedes. If not, see <https://www.gnu.org/licenses/>.
 
-use archimedes::parser::Module;
+use archimedes::{parser::Module, span::MapSpan};
 use tower_lsp::{LspService, Server};
 
 pub mod lsp;
@@ -28,7 +28,7 @@ async fn main() {
     if let Some("parse") = args.get(1).map(String::as_str) {
         let src = std::fs::read_to_string(&args[2]).unwrap();
         let module = Module::new(&src);
-        module.items();
+        eprintln!("{:#?}", module.items().map_span(&mut |_| ()));
         return;
     }
 
