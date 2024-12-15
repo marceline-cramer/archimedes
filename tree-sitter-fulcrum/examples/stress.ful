@@ -1,0 +1,54 @@
+; Stress test file for Fulcrum.
+
+Time(H00).
+Time(H01).
+Time(H02).
+Time(H03).
+Time(H04).
+Time(H05).
+Time(H06).
+Time(H07).
+Time(H08).
+Time(H09).
+Time(H11).
+Time(H12).
+Time(H13).
+Time(H14).
+Time(H15).
+Time(H16).
+Time(H17).
+Time(H18).
+Time(H19).
+Time(H20).
+Time(H21).
+Time(H22).
+Time(H23).
+
+Day(Monday).
+Day(Tuesday).
+Day(Wednesday).
+Day(Thursday).
+Day(Friday).
+Day(Saturday).
+Day(Sunday).
+
+Week(W1).
+Week(W2).
+Week(W3).
+Week(W4).
+
+Chore(Groceries).
+Chore(Dishes).
+Chore(Dinner).
+Chore(Surfaces).
+Chore(Tidy).
+Chore(Sweep).
+Chore(Mop).
+
+Member Walter.
+Member Dude.
+Member Donny.
+
+decide Assignment(day, time, week, chore, member) if Day(day), Time(time), Week(week), Chore(chore), Member(member).
+
+constrain(day, week, chore) cardinality to at most 1 Assignment(day, week, time, chore, member).

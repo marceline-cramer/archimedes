@@ -1,0 +1,24 @@
+[workspace]
+members = ["tree-sitter-fulcrum"]
+
+[workspace.dependencies]
+tree-sitter = "0.24"
+
+[package]
+name = "archimedes"
+version = "0.1.0"
+license = "AGPL-3.0-or-later"
+edition = "2021"
+
+[dependencies]
+differential-dataflow = "0.13"
+flume = "0.11"
+fnv = "1"
+indexmap = "2.6.0"
+serde = { version = "1", features = ["derive", "rc"] }
+timely = "0.14"
+tokio = { version = "1.42.0", features = ["full"] }
+tower-lsp = "0.20.0"
+tree-sitter.workspace = true
+tree-sitter-fulcrum.path = "tree-sitter-fulcrum"
+url = { version = "*", features = ["serde"] }
