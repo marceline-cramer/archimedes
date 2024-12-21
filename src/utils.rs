@@ -96,6 +96,16 @@ pub fn value<K, V>((_k, v): (K, V)) -> V {
     v
 }
 
+pub fn swap<K, V>((k, v): (K, V)) -> (V, K) {
+    (v, k)
+}
+
+pub fn map_value<K, I, O>(
+    mut cb: impl FnMut(I) -> Option<O>,
+) -> impl FnMut((K, I)) -> Option<(K, O)> {
+    move |(k, v)| cb(v).map(|v| (k, v))
+}
+
 pub fn run_dataflow<I: WorkerInput, O: WorkerOutput>(
     update_rx: Receiver<Vec<I::Update>>,
     cb: impl Fn(&mut Worker<Allocator>) -> (I, O) + Send + Sync + 'static,
@@ -362,8 +372,16 @@ impl<T, K, V> TraceMap<T, K, V> {
     }
 }
 
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+#[derive(Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Key<T>(u64, PhantomData<T>);
+
+impl<T> Copy for Key<T> {}
+
+impl<T> Clone for Key<T> {
+    fn clone(&self) -> Self {
+        *self
+    }
+}
 
 impl<T: Hashable<Output = u64>> Key<T> {
     pub fn new(data: &T) -> Self {
