@@ -11,6 +11,7 @@ license = "AGPL-3.0-or-later"
 edition = "2021"
 
 [dependencies]
+clap = { version = "4.5.23", features = ["derive"] }
 differential-dataflow = "0.13"
 flume = "0.11"
 fnv = "1"

@@ -16,24 +16,44 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with Archimedes. If not, see <https://www.gnu.org/licenses/>.
 
+use std::path::PathBuf;
+
 use archimedes::frontend::{parser::Module, span::MapSpan};
+use clap::{Parser, Subcommand};
 use tower_lsp::{LspService, Server};
 
 pub mod lsp;
 
+#[derive(Clone, Debug, Parser)]
+pub struct Args {
+    #[command(subcommand)]
+    pub command: Command,
+}
+
+#[derive(Clone, Debug, Subcommand)]
+pub enum Command {
+    /// Parses a Fulcrum file and dumps the AST debug-print to stderr.
+    Parse { path: PathBuf },
+
+    /// Run the Fulcrum language server over stdio.
+    Lsp,
+}
+
 #[tokio::main]
 async fn main() {
-    let args: Vec<_> = std::env::args().collect();
+    let args = Args::parse();
 
-    if let Some("parse") = args.get(1).map(String::as_str) {
-        let src = std::fs::read_to_string(&args[2]).unwrap();
-        let module = Module::new(&src);
-        eprintln!("{:#?}", module.items().map_span(&mut |_| ()));
-        return;
+    match args.command {
+        Command::Parse { path } => {
+            let src = std::fs::read_to_string(path).unwrap();
+            let module = Module::new(&src);
+            eprintln!("{:#?}", module.items().map_span(&mut |_| ()));
+        }
+        Command::Lsp => {
+            let stdin = tokio::io::stdin();
+            let stdout = tokio::io::stdout();
+            let (service, socket) = LspService::new(lsp::LspBackend::new);
+            Server::new(stdin, stdout, socket).serve(service).await;
+        }
     }
-
-    let stdin = tokio::io::stdin();
-    let stdout = tokio::io::stdout();
-    let (service, socket) = LspService::new(lsp::LspBackend::new);
-    Server::new(stdin, stdout, socket).serve(service).await;
 }
