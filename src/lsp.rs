@@ -25,7 +25,7 @@ use archimedes::{
     frontend::{
         dataflow::{frontend_worker, FrontendResultKind, FrontendUpdate},
         parser::Module,
-        span::Span,
+        span::{MapSpan, Span},
         types::ModuleItem,
     },
     utils::run_dataflow,
@@ -209,7 +209,11 @@ impl File {
 
         let mut updates = Vec::new();
         for (el, added) in removed.chain(added) {
-            updates.push(FrontendUpdate::Item(self.url.clone(), el.clone(), added));
+            updates.push(FrontendUpdate::Item(
+                self.url.clone(),
+                el.clone().map_span(&mut |span| (self.url.clone(), span)),
+                added,
+            ));
         }
 
         if !updates.is_empty() {

@@ -40,6 +40,8 @@ use crate::{
     utils::*,
 };
 
+use super::span::MapMultiSpan;
+
 pub fn frontend<G: Input>(inputs: FrontendInputs<G>) -> FrontendOutputs<G>
 where
     G::Timestamp: Lattice,
@@ -49,7 +51,7 @@ where
 
     // index all items: convert string variable names to indices
     let indexed_items = inputs.items.map(ModuleItem::index_variables);
-    let diagnostics = indexed_items.flat_map(value);
+    let diagnostics = indexed_items.flat_map(value).map(value);
     let indexed_items = indexed_items.map(key);
 
     // unspan items: decouple the contents of each (sub-)item from its physical span
@@ -139,10 +141,12 @@ where
 
     // combine all diagnostics
     let diagnostics = type_diagnostics
-        .map(|d| (d.span, d))
+        .flat_map(|d| d.clone().span_set().map(move |span| (span, d.clone())))
         .join(&span_keys)
-        .map(|(_key, (d, (url, span)))| (url, d.with_span(span)))
-        .concat(&inputs.items.flat_map(ModuleItem::diagnostic))
+        .map(|(key, (d, span))| (d, (key, span)))
+        .reduce(reduce_map)
+        .map(|(d, span_map)| d.map_multi_span(&span_map))
+        .concat(&inputs.items.flat_map(ModuleItem::diagnostic).map(value))
         .concat(&diagnostics)
         .distinct();
 
@@ -187,7 +191,7 @@ pub fn frontend_worker<A: Allocate>(
 }
 
 pub struct FrontendWorkerInput {
-    pub items: InputSession<(Url, ModuleItem<Span, String, String>)>,
+    pub items: InputSession<(Url, ModuleItem<(Url, Span), String, String>)>,
 }
 
 impl WorkerInput for FrontendWorkerInput {
@@ -213,12 +217,12 @@ impl WorkerInput for FrontendWorkerInput {
 
 #[derive(Clone, Debug)]
 pub enum FrontendUpdate {
-    Item(Url, ModuleItem<Span, String, String>, bool),
+    Item(Url, ModuleItem<(Url, Span), String, String>, bool),
 }
 
 pub struct FrontendWorkerOutput {
     pub probes: Vec<ProbeHandle<Time>>,
-    pub diagnostics: Box<dyn DynTraceMap<(Url, Diagnostic<Span>), ()>>,
+    pub diagnostics: Box<dyn DynTraceMap<Diagnostic<(Url, Span)>, ()>>,
     pub inlay_hints: Box<dyn DynTraceMap<(Url, InlayHint<Span>), ()>>,
     pub hover: Box<dyn DynTraceMap<(Url, (Point, (Point, String))), ()>>,
 }
@@ -245,7 +249,7 @@ impl WorkerOutput for FrontendWorkerOutput {
             .diagnostics
             .distinct_keys()
             .into_iter()
-            .map(|(url, diag)| (url, FrontendResultKind::Diagnostic(diag)));
+            .map(|d| (d.span.0.clone(), FrontendResultKind::Diagnostic(d)));
 
         let hover = self
             .hover
@@ -267,26 +271,28 @@ pub type FrontendResult = (Url, FrontendResultKind);
 
 #[derive(Clone, Debug)]
 pub enum FrontendResultKind {
-    Diagnostic(Diagnostic<Span>),
+    Diagnostic(Diagnostic<(Url, Span)>),
     InlayHint(InlayHint<Span>),
     Hover((Point, (Point, String))),
 }
 
 #[derive(Clone)]
 pub struct FrontendInputs<G: Scope> {
-    pub items: Collection<G, (Url, ModuleItem<Span, String, String>)>,
+    pub items: Collection<G, (Url, ModuleItem<(Url, Span), String, String>)>,
 }
 
 pub type SpanKey = (u64, usize);
 
 pub fn unspan(
-    item: IndexedItem<Span, String>,
+    item: IndexedItem<(Url, Span), String>,
 ) -> (
     IndexedItem<SpanKey, ResourceId>,
     Vec<(SpanKey, (Url, Span))>,
 ) {
-    let url = item.url.clone();
     let mut spans = Vec::new();
+
+    // TODO: technically this may erase URLs of relations...
+    let url = Arc::new(item.url.clone());
 
     let unspanned = item.map_span(&mut |span| {
         let idx = spans.len();
@@ -299,10 +305,9 @@ pub fn unspan(
     let span_map = spans
         .into_iter()
         .enumerate()
-        .map(|(idx, span)| ((key, idx), (url.clone(), span)))
+        .map(|(idx, span)| ((key, idx), span))
         .collect();
 
-    let url = Arc::new(url);
     let respanned = unspanned
         .map_span(&mut |span| (key, span))
         .map_relations(&mut |_span, sym| ResourceId::SourceSymbol(url.clone(), sym));
@@ -333,7 +338,14 @@ pub fn resolve_proposed_types(
                     let d = Diagnostic {
                         span: ty.span,
                         kind: DiagnosticKind::Error,
-                        contents: format!("Expected {lhs}, got {rhs}"),
+                        message: format!("Expected {lhs}, got {rhs}"),
+                        labels: vec![
+                            target
+                                .clone()
+                                .map(|target| format!("Expected {target} here...")),
+                            ty.clone()
+                                .map(|ty| format!("...but {ty} was defined here.")),
+                        ],
                     };
 
                     output.push((Err(d), 1));
@@ -366,13 +378,22 @@ pub fn merge_var_types(
             }
             Entry::Occupied(entry) => {
                 // TODO: recursive unification
-                let lhs = entry.get().clone().map_span(&mut |_| ());
+                let def = entry.get().clone();
+                let lhs = def.clone().map_span(&mut |_| ());
                 let rhs = ty.clone().map_span(&mut |_| ());
                 if lhs != rhs {
                     let d = Diagnostic {
-                        contents: format!("Pattern expects {rhs} but {:?} is {lhs}", var.inner),
+                        message: format!("Pattern expects {rhs} but got {lhs}"),
                         span: var.span,
                         kind: DiagnosticKind::Error,
+                        labels: vec![
+                            def.to_spanned_string().map(|def| {
+                                format!("The variable was inferred to be {def} here...")
+                            }),
+                            ty.clone()
+                                .to_spanned_string()
+                                .map(|ty| format!("...but expected to be {ty} here.")),
+                        ],
                     };
 
                     output.push((Err(d), 1));
@@ -386,8 +407,24 @@ pub fn merge_var_types(
     }
 }
 
+pub fn reduce_map<K, S, O>(
+    _key: &K,
+    input: &[(&(S, O), isize)],
+    output: &mut Vec<(BTreeMap<S, O>, isize)>,
+) where
+    S: Clone + Ord,
+    O: Clone,
+{
+    let map = input
+        .iter()
+        .map(|((key, val), _num)| (key.to_owned(), val.to_owned()))
+        .collect();
+
+    output.push((map, 1));
+}
+
 pub struct FrontendOutputs<G: Scope> {
-    pub diagnostics: Collection<G, (Url, Diagnostic<Span>)>,
+    pub diagnostics: Collection<G, Diagnostic<(Url, Span)>>,
     pub hover: Collection<G, (Url, (Point, (Point, String)))>,
     pub inlay_hints: Collection<G, (Url, InlayHint<Span>)>,
 }

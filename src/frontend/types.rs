@@ -19,6 +19,7 @@
 use std::{
     fmt::{Debug, Display},
     hash::Hash,
+    ops::Range,
     sync::Arc,
 };
 
@@ -64,20 +65,45 @@ impl<S> InlayHint<S> {
 pub struct Diagnostic<S> {
     pub span: S,
     pub kind: DiagnosticKind,
-    pub contents: String,
+    pub message: String,
+    pub labels: Vec<Spanned<S, String>>,
 }
 
 impl<S> Diagnostic<S> {
-    pub fn with_span<O>(self, span: O) -> Diagnostic<O> {
-        Diagnostic {
-            span,
-            kind: self.kind,
-            contents: self.contents,
-        }
+    pub fn span_set(self) -> impl Iterator<Item = S> {
+        std::iter::once(self.span).chain(self.labels.into_iter().map(|label| label.span))
     }
 }
 
-impl Diagnostic<Span> {
+impl<ID> Diagnostic<(ID, Range<usize>)>
+where
+    ID: Clone + Debug + Hash + Eq,
+{
+    pub fn to_ariadne(&self) -> ariadne::Report<'static, (ID, Range<usize>)> {
+        use ariadne::*;
+
+        let kind = match self.kind {
+            DiagnosticKind::Error => ReportKind::Error,
+            DiagnosticKind::Warning => ReportKind::Warning,
+            DiagnosticKind::Info => ReportKind::Custom("Info", Color::White),
+            DiagnosticKind::Note => ReportKind::Custom("Note", Color::Blue),
+        };
+
+        let span = self.span.clone();
+
+        let labels = self
+            .labels
+            .iter()
+            .map(|label| Label::new(label.span.clone()).with_message(label.inner.clone()));
+
+        Report::build(kind, span.clone())
+            .with_message(self.message.clone())
+            .with_labels(labels)
+            .finish()
+    }
+}
+
+impl Diagnostic<(Url, Span)> {
     pub fn to_lsp(&self) -> tower_lsp::lsp_types::Diagnostic {
         use tower_lsp::lsp_types::DiagnosticSeverity;
         let severity = match self.kind {
@@ -88,9 +114,9 @@ impl Diagnostic<Span> {
         };
 
         tower_lsp::lsp_types::Diagnostic {
-            range: self.span.into(),
+            range: self.span.1.into(),
             severity: Some(severity),
-            message: self.contents.clone(),
+            message: self.message.clone(),
             ..Default::default()
         }
     }
@@ -176,6 +202,17 @@ pub type Type<S> = Pattern<S, PrimitiveType>;
 pub enum Pattern<S, T> {
     Leaf(Spanned<S, T>),
     Tuple(Spanned<S, Vec<Spanned<S, Self>>>),
+}
+
+impl<S, T: Display> Pattern<S, T> {
+    pub fn to_spanned_string(self) -> Spanned<S, String> {
+        let rendered = self.to_string();
+
+        match self {
+            Pattern::Leaf(el) => el.map(|_| rendered),
+            Pattern::Tuple(el) => el.map(|_| rendered),
+        }
+    }
 }
 
 impl<S, T: Display> Display for Pattern<S, T> {

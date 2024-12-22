@@ -66,7 +66,11 @@ impl Module {
                         items.push(ModuleItem::Diagnostic(Diagnostic {
                             span: node.range(),
                             kind: DiagnosticKind::Error,
-                            contents: "Syntax error".to_string(),
+                            message: "Syntax error".to_string(),
+                            labels: vec![Spanned {
+                                span: node.range(),
+                                inner: "Occurs here.".to_string(),
+                            }],
                         }));
                     }
                 }

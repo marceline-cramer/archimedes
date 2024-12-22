@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with Archimedes. If not, see <https://www.gnu.org/licenses/>.
 
-use std::{fmt::Display, ops::Deref};
+use std::{collections::BTreeMap, fmt::Display, ops::Deref};
 
 use serde::{Deserialize, Serialize};
 
@@ -40,7 +40,8 @@ impl<S, O> MapSpan<S, O> for Diagnostic<S> {
         Diagnostic {
             span: cb(self.span),
             kind: self.kind,
-            contents: self.contents,
+            message: self.message,
+            labels: self.labels.map_span(cb),
         }
     }
 }
@@ -213,16 +214,6 @@ impl<S, T> Spanned<S, T> {
     }
 }
 
-impl<S, T: ToString> Spanned<S, T> {
-    pub fn diagnostic(self, kind: DiagnosticKind) -> Diagnostic<S> {
-        Diagnostic {
-            span: self.span,
-            kind,
-            contents: self.inner.to_string(),
-        }
-    }
-}
-
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Span<T = Point> {
     pub start: T,
@@ -268,6 +259,25 @@ impl From<Point> for tower_lsp::lsp_types::Position {
             line: pt.row as u32,
             character: pt.col as u32,
         }
+    }
+}
+
+pub trait MapMultiSpan<S, O>: MapSpan<S, O> {
+    fn map_multi_span(self, map: &BTreeMap<S, O>) -> Self::Target;
+}
+
+impl<S, O, T> MapMultiSpan<S, O> for T
+where
+    T: MapSpan<S, O>,
+    S: Ord,
+    O: Clone,
+{
+    fn map_multi_span(self, map: &BTreeMap<S, O>) -> Self::Target {
+        self.map_span(&mut |span| {
+            map.get(&span)
+                .expect("missing span key from multi-span map")
+                .to_owned()
+        })
     }
 }
 

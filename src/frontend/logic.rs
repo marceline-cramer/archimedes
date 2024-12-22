@@ -164,7 +164,11 @@ impl<S: Clone, R: Clone> ModuleItem<S, R, String> {
                 let d = Diagnostic {
                     span: span.clone(),
                     kind: DiagnosticKind::Error,
-                    contents: format!("{name:?} does not appear within body"),
+                    message: format!("{name:?} does not appear within body"),
+                    labels: vec![Spanned {
+                        span: span.clone(),
+                        inner: "Defined here.".to_string(),
+                    }],
                 };
 
                 diagnostics.push((url.clone(), d));
@@ -341,12 +345,14 @@ impl<S: Clone + Debug + Eq, T> Pattern<S, TypeTerm<S, T>> {
                     if lhs.len() != rhs.len() {
                         diagnostics.push(Diagnostic {
                             kind: DiagnosticKind::Error,
-                            contents: format!(
+                            message: format!(
                                 "Expected tuple of arity {}, got tuple of arity {}",
                                 lhs.len(),
                                 rhs.len()
                             ),
                             span: lhs.span,
+                            // TODO
+                            labels: vec![],
                         });
                     } else {
                         lhs.inner.into_iter().zip(rhs.inner).for_each(|(lhs, rhs)| {
@@ -357,12 +363,14 @@ impl<S: Clone + Debug + Eq, T> Pattern<S, TypeTerm<S, T>> {
                 Pattern::Leaf(prim) => {
                     diagnostics.push(Diagnostic {
                         kind: DiagnosticKind::Error,
-                        contents: format!(
+                        message: format!(
                             "Expected tuple of arity {}, got {:?}",
                             lhs.len(),
                             prim.inner
                         ),
                         span: lhs.span,
+                        // TODO
+                        labels: vec![],
                     });
                 }
             },
@@ -375,7 +383,9 @@ impl<S: Clone + Debug + Eq, T> Pattern<S, TypeTerm<S, T>> {
                         diagnostics.push(Diagnostic {
                             span: prim.span,
                             kind: DiagnosticKind::Error,
-                            contents: format!("Expected {:?}, got {target:?}", prim.inner),
+                            message: format!("Expected {:?}, got {target:?}", prim.inner),
+                            // TODO
+                            labels: vec![],
                         });
                     }
                 }

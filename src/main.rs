@@ -18,9 +18,17 @@
 
 use std::path::PathBuf;
 
-use archimedes::frontend::{parser::Module, span::MapSpan};
+use archimedes::{
+    frontend::{
+        dataflow::{frontend_worker, FrontendResultKind, FrontendUpdate},
+        parser::Module,
+        span::{MapSpan, Point},
+    },
+    utils::run_dataflow,
+};
 use clap::{Parser, Subcommand};
 use tower_lsp::{LspService, Server};
+use url::Url;
 
 pub mod lsp;
 
@@ -32,6 +40,9 @@ pub struct Args {
 
 #[derive(Clone, Debug, Subcommand)]
 pub enum Command {
+    /// Executes a Fulcrum file and displays its decision selection.
+    Run { path: PathBuf },
+
     /// Parses a Fulcrum file and dumps the AST debug-print to stderr.
     Parse { path: PathBuf },
 
@@ -44,6 +55,7 @@ async fn main() {
     let args = Args::parse();
 
     match args.command {
+        Command::Run { path } => command_run(path),
         Command::Parse { path } => {
             let src = std::fs::read_to_string(path).unwrap();
             let module = Module::new(&src);
@@ -54,6 +66,63 @@ async fn main() {
             let stdout = tokio::io::stdout();
             let (service, socket) = LspService::new(lsp::LspBackend::new);
             Server::new(stdin, stdout, socket).serve(service).await;
+        }
+    }
+}
+
+pub fn command_run(path: PathBuf) {
+    let url = Url::from_file_path(path.canonicalize().expect("failed to canonicalize path"))
+        .expect("failed to create URI to file path");
+
+    let src = std::fs::read_to_string(&path).unwrap();
+    let module = Module::new(&src);
+    let (update_tx, update_rx) = flume::unbounded();
+    let result_rx = run_dataflow(update_rx, frontend_worker);
+
+    let updates = module
+        .items()
+        .into_iter()
+        .map(|item| item.map_span(&mut |span| (url.clone(), span)))
+        .map(|item| FrontendUpdate::Item(url.clone(), item, true))
+        .collect();
+
+    update_tx
+        .send(updates)
+        .expect("failed to send item updates to dataflow");
+
+    let results = result_rx
+        .recv()
+        .expect("failed to receive dataflow results");
+
+    let filename = path
+        .file_name()
+        .expect("failed to get file name")
+        .to_string_lossy()
+        .to_string();
+
+    let src = ariadne::Source::from(src);
+    for (result_url, result) in results {
+        match result {
+            FrontendResultKind::Diagnostic(d) => {
+                d.map_span(&mut |(url, span)| {
+                    let map_point =
+                        |point: Point| src.line(point.row).unwrap().offset() + point.col;
+
+                    let span = map_point(span.start)..map_point(span.end);
+
+                    let id = if url == result_url {
+                        filename.clone()
+                    } else {
+                        result_url.to_string()
+                    };
+
+                    (id, span)
+                })
+                .to_ariadne()
+                .print((filename.clone(), src.clone()))
+                .expect("failed to print report");
+            }
+            _ => {}
         }
     }
 }
