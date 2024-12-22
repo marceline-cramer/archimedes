@@ -19,6 +19,7 @@
 use std::{
     fmt::{Debug, Display},
     hash::Hash,
+    sync::Arc,
 };
 
 use serde::{Deserialize, Serialize};
@@ -235,5 +236,5 @@ impl Display for PrimitiveType {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub enum ResourceId {
-    SourceSymbol(Url, String),
+    SourceSymbol(Arc<Url>, String),
 }

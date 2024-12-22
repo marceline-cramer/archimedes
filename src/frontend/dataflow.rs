@@ -16,7 +16,7 @@
 // You should have received a copy of the GNU Affero General Public License
 // along with Archimedes. If not, see <https://www.gnu.org/licenses/>.
 
-use std::collections::BTreeMap;
+use std::{collections::BTreeMap, sync::Arc};
 
 use differential_dataflow::{
     input::Input,
@@ -296,15 +296,16 @@ pub fn unspan(
 
     let key = unspanned.hashed();
 
-    let respanned = unspanned
-        .map_span(&mut |span| (key, span))
-        .map_relations(&mut |_span, sym| ResourceId::SourceSymbol(url.clone(), sym));
-
     let span_map = spans
         .into_iter()
         .enumerate()
         .map(|(idx, span)| ((key, idx), (url.clone(), span)))
         .collect();
+
+    let url = Arc::new(url);
+    let respanned = unspanned
+        .map_span(&mut |span| (key, span))
+        .map_relations(&mut |_span, sym| ResourceId::SourceSymbol(url.clone(), sym));
 
     (respanned, span_map)
 }
