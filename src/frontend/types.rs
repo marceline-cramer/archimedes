@@ -19,116 +19,13 @@
 use std::{
     fmt::{Debug, Display},
     hash::Hash,
-    ops::Range,
     sync::Arc,
 };
 
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::frontend::span::{Span, Spanned};
-
-pub type DiagnosticResult<S, T> = Result<T, Diagnostic<S>>;
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub struct InlayHint<S> {
-    pub span: S,
-    pub contents: String,
-}
-
-impl InlayHint<Span> {
-    pub fn to_lsp(&self) -> tower_lsp::lsp_types::InlayHint {
-        use tower_lsp::lsp_types::*;
-        InlayHint {
-            position: self.span.end.into(),
-            label: InlayHintLabel::String(self.contents.clone()),
-            kind: Some(InlayHintKind::TYPE),
-            text_edits: None,
-            tooltip: None,
-            padding_left: None,
-            padding_right: None,
-            data: None,
-        }
-    }
-}
-
-impl<S> InlayHint<S> {
-    pub fn with_span<O>(self, span: O) -> InlayHint<O> {
-        InlayHint {
-            span,
-            contents: self.contents,
-        }
-    }
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub struct Diagnostic<S> {
-    pub span: S,
-    pub kind: DiagnosticKind,
-    pub message: String,
-    pub labels: Vec<Spanned<S, String>>,
-}
-
-impl<S> Diagnostic<S> {
-    pub fn span_set(self) -> impl Iterator<Item = S> {
-        std::iter::once(self.span).chain(self.labels.into_iter().map(|label| label.span))
-    }
-}
-
-impl<ID> Diagnostic<(ID, Range<usize>)>
-where
-    ID: Clone + Debug + Hash + Eq,
-{
-    pub fn to_ariadne(&self) -> ariadne::Report<'static, (ID, Range<usize>)> {
-        use ariadne::*;
-
-        let kind = match self.kind {
-            DiagnosticKind::Error => ReportKind::Error,
-            DiagnosticKind::Warning => ReportKind::Warning,
-            DiagnosticKind::Info => ReportKind::Custom("Info", Color::White),
-            DiagnosticKind::Note => ReportKind::Custom("Note", Color::Blue),
-        };
-
-        let span = self.span.clone();
-
-        let labels = self
-            .labels
-            .iter()
-            .map(|label| Label::new(label.span.clone()).with_message(label.inner.clone()));
-
-        Report::build(kind, span.clone())
-            .with_message(self.message.clone())
-            .with_labels(labels)
-            .finish()
-    }
-}
-
-impl Diagnostic<(Url, Span)> {
-    pub fn to_lsp(&self) -> tower_lsp::lsp_types::Diagnostic {
-        use tower_lsp::lsp_types::DiagnosticSeverity;
-        let severity = match self.kind {
-            DiagnosticKind::Error => DiagnosticSeverity::ERROR,
-            DiagnosticKind::Warning => DiagnosticSeverity::WARNING,
-            DiagnosticKind::Info => DiagnosticSeverity::INFORMATION,
-            DiagnosticKind::Note => DiagnosticSeverity::HINT,
-        };
-
-        tower_lsp::lsp_types::Diagnostic {
-            range: self.span.1.into(),
-            severity: Some(severity),
-            message: self.message.clone(),
-            ..Default::default()
-        }
-    }
-}
-
-#[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub enum DiagnosticKind {
-    Error,
-    Warning,
-    Info,
-    Note,
-}
+pub use crate::frontend::{diagnostics::*, span::Spanned};
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct IndexedItem<S, R> {
