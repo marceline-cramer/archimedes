@@ -19,7 +19,6 @@
 use std::collections::BTreeMap;
 
 use differential_dataflow::{
-    algorithms::identifiers::Identifiers,
     input::Input,
     lattice::Lattice,
     operators::{arrange::ArrangeBySelf, iterate::Variable, Join, Reduce, Threshold},
@@ -46,221 +45,106 @@ where
     G::Timestamp: Lattice,
 {
     let mut scope = inputs.items.scope();
-    let unspanned = inputs.clone().unspan();
     let hover = scope.new_collection().1;
 
-    let indexed_rules = unspanned
-        .items
-        .flat_map(|r| ModuleItem::rule(((), r)))
-        .map(value)
-        .map(Rule::index_variables);
+    // index all items: convert string variable names to indices
+    let indexed_items = inputs.items.map(ModuleItem::index_variables);
+    let diagnostics = indexed_items.flat_map(value);
+    let indexed_items = indexed_items.map(key);
 
-    let diagnostics = indexed_rules.flat_map(value).consolidate();
+    // unspan items: decouple the contents of each (sub-)item from its physical span
+    let unspanned = indexed_items.map(unspan);
+    let span_keys = unspanned.flat_map(value);
+    let items = unspanned.map(key);
 
-    let rules = inputs.items.flat_map(ModuleItem::rule);
+    // create unique identifiers for each item
+    let item_keys = items.map(Key::pair);
 
-    let base_types = inputs
-        .items
-        .flat_map(ModuleItem::rule)
-        .flat_map(|(url, rule)| rule.base_type().map(|(relation, ty)| ((url, relation), ty)));
+    // find all of the typing combinators from the given items
+    let base_types = items.flat_map(IndexedItem::base_type);
+    let head_types = item_keys.flat_map(map_value(IndexedItem::head_type));
+    let body_types = item_keys.flat_map(IndexedItem::body_types);
 
-    let rule_keys = rules.identifiers().map(|(rule, key)| (key, rule));
-
-    let head_types = rule_keys.flat_map(|(key, (url, rule))| {
-        // TODO: this actually would replace the work of base_types if unblocked
-        if rule.body.is_empty() {
-            return None;
-        }
-
-        let relation = (url.clone(), rule.head.inner.relation.inner.clone());
-
-        let ty = rule
-            .head
-            .inner
-            .pattern
-            .inner
-            .map_leaves(&mut |term| match term {
-                AnyTerm::Variable(name) => AnyTerm::Variable(name),
-                AnyTerm::Value(val) => AnyTerm::Value(val.map(|inner| inner.ty())),
-            });
-
-        let ty = Spanned {
-            span: rule.head.span,
-            inner: ty,
-        };
-
-        Some((key, (relation, ty)))
-    });
-
-    let body_types = rule_keys.flat_map(|(key, (url, rule))| {
-        rule.body.into_iter().map(move |atom| {
-            let relation = (url.clone(), atom.relation.inner.clone());
-
-            let ty = atom.inner.pattern.inner.map_leaves(&mut |term| match term {
-                AnyTerm::Variable(name) => AnyTerm::Variable(name),
-                AnyTerm::Value(val) => AnyTerm::Value(val.map(|inner| inner.ty())),
-            });
-
-            (relation, (key, ty))
-        })
-    });
-
-    let (types, type_diagnostics, var_types) = scope.iterative::<u16, _, _>(|scope| {
+    // iteratively derive the types of all relations using bottom-up fixed-point evaluation
+    let (relation_types, type_diagnostics, item_types) = scope.iterative::<u16, _, _>(|scope| {
+        // init loop variables
         let step = Product::new(Default::default(), 1);
         let proposed_types = Variable::new_from(base_types.enter(scope), step.clone());
-        let var_types = Variable::new(scope, step.clone());
-        let resolved_types = Variable::new(scope, step.clone());
-        let diagnostics = Variable::new(scope, step.clone());
+        let item_types = Variable::new(scope, step.clone());
 
+        let resolved_types: Variable<_, (ResourceId, Spanned<SpanKey, Type<SpanKey>>), isize> =
+            Variable::new(scope, step.clone());
+
+        // create a bag of diagnostics to aggregate from each operation
+        let diagnostics = Variable::new(scope, step.clone());
         let mut new_diagnostics = Aggregate::from_collection(diagnostics.clone());
 
-        let new_resolved = proposed_types
-            .reduce(|_key, input, output| {
-                let mut resolved = None;
-                for (ty, _diff) in input.iter().cloned() {
-                    match resolved.as_ref() {
-                        None => {
-                            output.push((Ok(ty.clone()), 1));
-                            resolved = Some(ty.to_owned());
-                        }
-                        Some(target) => {
-                            // TODO: recursive unification
-                            let lhs = target.clone().map_span(&mut |_| ());
-                            let rhs = ty.clone().map_span(&mut |_| ());
-                            if lhs != rhs {
-                                let d = Diagnostic {
-                                    span: ty.span,
-                                    kind: DiagnosticKind::Error,
-                                    contents: format!("Expected {lhs}, got {rhs}"),
-                                };
-
-                                output.push((Err(d), 1));
-                            }
-                        }
-                    }
-                }
-            })
-            .map(|((url, relation), v)| {
-                v.map(|ok| ((url.clone(), relation), ok))
-                    .map_err(|err| (url, err))
-            })
-            .consolidate();
-
-        let new_types = new_diagnostics.with_errs(&new_resolved);
-
-        let new_body = body_types.enter(scope).join(&new_types).flat_map(
-            |((url, _relation), ((key, src), dst))| {
-                let mut diagnostics = Vec::new();
-                let mut resolved = Vec::new();
-
-                src.unify(dst.inner, &mut diagnostics, &mut |var, ty| {
-                    resolved.push((var, ty));
-                });
-
-                resolved
-                    .into_iter()
-                    .map(|(var, ty)| Ok((key, (url.clone(), var, ty))))
-                    .chain(diagnostics.into_iter().map(|d| Err((url.clone(), d))))
-                    .collect::<Vec<_>>()
-            },
+        // unify the patterns of each body type with its relation's type
+        let new_body = new_diagnostics.with_errs(
+            &body_types
+                .enter(scope)
+                .join(&resolved_types)
+                .map(value)
+                .flat_map(|((key, src), dst)| src.unify(key, dst.inner)),
         );
 
-        let new_resolved_vars = new_diagnostics
-            .with_errs(&new_body)
-            .reduce(|_key, input, output| {
-                let mut resolved = BTreeMap::new();
-                for ((url, var, ty), _diff) in input.iter().cloned() {
-                    use std::collections::btree_map::Entry;
-                    match resolved.entry(var.inner.clone()) {
-                        Entry::Vacant(entry) => {
-                            entry.insert(ty.clone());
-                        }
-                        Entry::Occupied(entry) => {
-                            // TODO: recursive unification
-                            let lhs = entry.get().clone().map_span(&mut |_| ());
-                            let rhs = ty.clone().map_span(&mut |_| ());
-                            if lhs != rhs {
-                                let d = Diagnostic {
-                                    contents: format!(
-                                        "Pattern expects {rhs} but {:?} is {lhs}",
-                                        var.inner
-                                    ),
-                                    span: var.span,
-                                    kind: DiagnosticKind::Error,
-                                };
+        // reduce the variable types of each item into a single map
+        let var_maps = new_diagnostics.with_errs(&new_body.reduce(merge_var_types).map(value));
 
-                                output.push((Err((url.clone(), d)), 1));
-                            }
-                        }
-                    }
-                }
-
-                if !resolved.is_empty() {
-                    output.push((Ok(resolved), 1));
-                }
-            })
-            .map(|(k, v)| v.map(|ok| (k, ok)));
-
-        let new_resolved_vars = new_diagnostics.with_errs(&new_resolved_vars);
-
-        let resolved_body = new_resolved_vars
+        // infer types of items from complete variable maps
+        let resolved_body = var_maps
             .join(&head_types.enter(scope))
-            .flat_map(|(_key, (vars, (relation, dst)))| {
+            .map(value)
+            .flat_map(|(vars, (relation, dst))| {
                 dst.map(|dst| dst.flat_quantify(&mut |var| vars.get(&var).cloned()))
                     .flatten()
                     .map(|ty| (relation, ty))
             })
             .distinct();
 
-        proposed_types.set_concat(&resolved_body);
-        let resolved = resolved_types.set_concat(&new_types);
-        let diagnostics = diagnostics.set_concat(&new_diagnostics.as_ref().distinct());
-        let var_types = var_types.set_concat(&new_resolved_vars);
+        // resolve proposed types for each relation
+        let new_resolved = new_diagnostics.with_errs(
+            &proposed_types
+                .reduce(resolve_proposed_types)
+                .map(value)
+                .consolidate(),
+        );
 
-        (resolved.leave(), diagnostics.leave(), var_types.leave())
+        // feed forward all new results to next iteration
+        let resolved = resolved_types.set_concat(&new_resolved);
+        let diagnostics = diagnostics.set_concat(&new_diagnostics.as_ref().distinct());
+        let item_types = item_types.set_concat(&var_maps);
+        proposed_types.set_concat(&resolved_body);
+
+        // pass completed results to caller
+        (resolved.leave(), diagnostics.leave(), item_types.leave())
     });
 
-    let type_hints = var_types
-        .join(&rule_keys)
-        .flat_map(|(_key, (vars, (url, rule)))| {
-            let mut touched = BTreeMap::new();
-
-            rule.head
-                .inner
-                .pattern
-                .inner
-                .map_variables(&mut |span, var| {
-                    touched.entry(var).or_insert(*span);
-                });
-
-            for body in rule.body {
-                body.inner.pattern.inner.map_variables(&mut |span, var| {
-                    touched.entry(var).or_insert(*span);
-                });
-            }
-
-            touched.into_iter().map(move |(name, span)| {
-                let contents = match vars.get(&name) {
-                    Some(ty) => format!(": {ty}"),
-                    None => ": {unknown}".to_string(),
-                };
-
-                let span = span.end;
-                let hint = InlayHint { span, contents };
-
-                (url.clone(), hint)
-            })
-        });
-
-    let diagnostics = diagnostics
-        .map(|d| (d.span, d))
-        .join(&unspanned.spans)
-        .map(|(_key, (d, (url, span)))| (url, d.with_span(span)))
-        .concat(&inputs.items.flat_map(ModuleItem::diagnostic))
-        .concat(&type_diagnostics)
+    // fill missing item typings with blank variable maps
+    let var_types = item_keys
+        .map(|(key, _item)| (key, BTreeMap::default()))
+        .antijoin(&item_types.map(key))
+        .concat(&item_types)
         .distinct();
 
-    let inlay_hints = type_hints.distinct();
+    // combine all inlay hints
+    let inlay_hints = var_types
+        .join(&item_keys)
+        .map(value)
+        .flat_map(|(vars, item)| item.type_hints(&vars))
+        .map(|h| (h.span, h))
+        .join(&span_keys)
+        .map(|(_key, (h, (url, span)))| (url, h.with_span(span)))
+        .distinct();
+
+    // combine all diagnostics
+    let diagnostics = type_diagnostics
+        .map(|d| (d.span, d))
+        .join(&span_keys)
+        .map(|(_key, (d, (url, span)))| (url, d.with_span(span)))
+        .concat(&inputs.items.flat_map(ModuleItem::diagnostic))
+        .concat(&diagnostics)
+        .distinct();
 
     FrontendOutputs {
         diagnostics,
@@ -335,7 +219,7 @@ pub enum FrontendUpdate {
 pub struct FrontendWorkerOutput {
     pub probes: Vec<ProbeHandle<Time>>,
     pub diagnostics: Box<dyn DynTraceMap<(Url, Diagnostic<Span>), ()>>,
-    pub inlay_hints: Box<dyn DynTraceMap<(Url, InlayHint<Point>), ()>>,
+    pub inlay_hints: Box<dyn DynTraceMap<(Url, InlayHint<Span>), ()>>,
     pub hover: Box<dyn DynTraceMap<(Url, (Point, (Point, String))), ()>>,
 }
 
@@ -384,7 +268,7 @@ pub type FrontendResult = (Url, FrontendResultKind);
 #[derive(Clone, Debug)]
 pub enum FrontendResultKind {
     Diagnostic(Diagnostic<Span>),
-    InlayHint(InlayHint<Point>),
+    InlayHint(InlayHint<Span>),
     Hover((Point, (Point, String))),
 }
 
@@ -395,16 +279,13 @@ pub struct FrontendInputs<G: Scope> {
 
 pub type SpanKey = (u64, usize);
 
-pub fn indirect_spans<T>(
-    (url, item): (Url, T),
+pub fn unspan(
+    item: IndexedItem<Span, String>,
 ) -> (
+    IndexedItem<SpanKey, ResourceId>,
     Vec<(SpanKey, (Url, Span))>,
-    <T::Target as MapSpan<usize, SpanKey>>::Target,
-)
-where
-    T: MapSpan<Span, usize>,
-    T::Target: MapSpan<usize, SpanKey> + Hashable<Output = u64>,
-{
+) {
+    let url = item.url.clone();
     let mut spans = Vec::new();
 
     let unspanned = item.map_span(&mut |span| {
@@ -414,7 +295,10 @@ where
     });
 
     let key = unspanned.hashed();
-    let respanned = unspanned.map_span(&mut |span| (key, span));
+
+    let respanned = unspanned
+        .map_span(&mut |span| (key, span))
+        .map_relations(&mut |_span, sym| ResourceId::SourceSymbol(url.clone(), sym));
 
     let span_map = spans
         .into_iter()
@@ -422,31 +306,87 @@ where
         .map(|(idx, span)| ((key, idx), (url.clone(), span)))
         .collect();
 
-    (span_map, respanned)
+    (respanned, span_map)
 }
 
-impl<G: Scope> FrontendInputs<G>
-where
-    G::Timestamp: Lattice,
-{
-    pub fn unspan(self) -> FrontendUnspanned<G> {
-        let items = self.items.map(indirect_spans);
-        let spans = items.flat_map(key).distinct();
+pub fn resolve_proposed_types(
+    key: &ResourceId,
+    input: &[(&Spanned<SpanKey, Type<SpanKey>>, isize)],
+    output: &mut Vec<(
+        Result<(ResourceId, Spanned<SpanKey, Type<SpanKey>>), Diagnostic<SpanKey>>,
+        isize,
+    )>,
+) {
+    let mut resolved = None;
+    for (ty, _diff) in input.iter().cloned() {
+        match resolved.as_ref() {
+            None => {
+                output.push((Ok((key.clone(), ty.clone())), 1));
+                resolved = Some(ty.to_owned());
+            }
+            Some(target) => {
+                // TODO: recursive unification
+                let lhs = target.clone().map_span(&mut |_| ());
+                let rhs = ty.clone().map_span(&mut |_| ());
+                if lhs != rhs {
+                    let d = Diagnostic {
+                        span: ty.span,
+                        kind: DiagnosticKind::Error,
+                        contents: format!("Expected {lhs}, got {rhs}"),
+                    };
 
-        FrontendUnspanned {
-            items: items.map(value),
-            spans,
+                    output.push((Err(d), 1));
+                }
+            }
         }
     }
 }
 
-pub struct FrontendUnspanned<G: Scope> {
-    pub items: Collection<G, ModuleItem<SpanKey, String, String>>,
-    pub spans: Collection<G, (SpanKey, (Url, Span))>,
+pub fn merge_var_types(
+    key: &Key<IndexedItem<(u64, usize), ResourceId>>,
+    input: &[(&(Spanned<SpanKey, usize>, Type<SpanKey>), isize)],
+    output: &mut Vec<(
+        Result<
+            (
+                Key<IndexedItem<SpanKey, ResourceId>>,
+                BTreeMap<usize, Type<SpanKey>>,
+            ),
+            Diagnostic<SpanKey>,
+        >,
+        isize,
+    )>,
+) {
+    let mut resolved = BTreeMap::new();
+    for ((var, ty), _diff) in input.iter().cloned() {
+        use std::collections::btree_map::Entry;
+        match resolved.entry(var.inner) {
+            Entry::Vacant(entry) => {
+                entry.insert(ty.clone());
+            }
+            Entry::Occupied(entry) => {
+                // TODO: recursive unification
+                let lhs = entry.get().clone().map_span(&mut |_| ());
+                let rhs = ty.clone().map_span(&mut |_| ());
+                if lhs != rhs {
+                    let d = Diagnostic {
+                        contents: format!("Pattern expects {rhs} but {:?} is {lhs}", var.inner),
+                        span: var.span,
+                        kind: DiagnosticKind::Error,
+                    };
+
+                    output.push((Err(d), 1));
+                }
+            }
+        }
+    }
+
+    if !resolved.is_empty() {
+        output.push((Ok((*key, resolved)), 1));
+    }
 }
 
 pub struct FrontendOutputs<G: Scope> {
     pub diagnostics: Collection<G, (Url, Diagnostic<Span>)>,
     pub hover: Collection<G, (Url, (Point, (Point, String)))>,
-    pub inlay_hints: Collection<G, (Url, InlayHint<Point>)>,
+    pub inlay_hints: Collection<G, (Url, InlayHint<Span>)>,
 }

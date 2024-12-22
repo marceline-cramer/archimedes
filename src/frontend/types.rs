@@ -24,7 +24,7 @@ use std::{
 use serde::{Deserialize, Serialize};
 use url::Url;
 
-use crate::frontend::span::{Point, Span, Spanned};
+use crate::frontend::span::{Span, Spanned};
 
 pub type DiagnosticResult<S, T> = Result<T, Diagnostic<S>>;
 
@@ -34,11 +34,11 @@ pub struct InlayHint<S> {
     pub contents: String,
 }
 
-impl InlayHint<Point> {
+impl InlayHint<Span> {
     pub fn to_lsp(&self) -> tower_lsp::lsp_types::InlayHint {
         use tower_lsp::lsp_types::*;
         InlayHint {
-            position: self.span.into(),
+            position: self.span.end.into(),
             label: InlayHintLabel::String(self.contents.clone()),
             kind: Some(InlayHintKind::TYPE),
             text_edits: None,
@@ -103,7 +103,14 @@ pub enum DiagnosticKind {
     Note,
 }
 
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash)]
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
+pub struct IndexedItem<S, R> {
+    pub url: Url,
+    pub variables: Vec<Spanned<S, String>>,
+    pub inner: ModuleItem<S, R, usize>,
+}
+
+#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub enum ModuleItem<S, R, T> {
     Rule(Rule<S, R, T>),
     Decision(Decision<S, R, T>),
@@ -131,12 +138,6 @@ impl<S, R, T> ModuleItem<S, R, T> {
 pub struct Decision<S, R, T>(pub Rule<S, R, T>);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub struct IndexedRule<S> {
-    pub variables: Vec<Spanned<S, String>>,
-    pub inner: Rule<S, String, usize>,
-}
-
-#[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Rule<S, R, T> {
     pub head: Spanned<S, Atom<S, R, Term<S, T>>>,
     pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
@@ -144,7 +145,7 @@ pub struct Rule<S, R, T> {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Constraint<S, R, T> {
-    pub captures: Vec<Spanned<S, String>>,
+    pub captures: Vec<Spanned<S, T>>,
     pub kind: Spanned<S, ConstraintKind>,
     pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
 }
@@ -234,5 +235,5 @@ impl Display for PrimitiveType {
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub enum ResourceId {
-    Module(Url, String),
+    SourceSymbol(Url, String),
 }

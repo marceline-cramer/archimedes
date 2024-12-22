@@ -45,6 +45,21 @@ impl<S, O> MapSpan<S, O> for Diagnostic<S> {
     }
 }
 
+impl<S, O, R> MapSpan<S, O> for IndexedItem<S, R>
+where
+    R: MapSpan<S, O>,
+{
+    type Target = IndexedItem<O, R::Target>;
+
+    fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
+        IndexedItem {
+            url: self.url,
+            variables: self.variables.map_span(cb),
+            inner: self.inner.map_span(cb),
+        }
+    }
+}
+
 impl<S, O, R, T> MapSpan<S, O> for ModuleItem<S, R, T>
 where
     R: MapSpan<S, O>,
@@ -157,8 +172,8 @@ where
 }
 
 impl Spanless for Value {}
-
 impl Spanless for PrimitiveType {}
+impl Spanless for usize {}
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Spanned<S, T> {

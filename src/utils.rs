@@ -79,12 +79,11 @@ impl<G: Scope, T: Data> Aggregate<G, T> {
         other.flat_map(Result::ok)
     }
 
-    pub fn with_errs<O, E>(&mut self, other: &Collection<G, Result<O, E>>) -> Collection<G, O>
+    pub fn with_errs<O>(&mut self, other: &Collection<G, Result<O, T>>) -> Collection<G, O>
     where
         O: Data,
-        E: Data + Into<T>,
     {
-        self.with_map_errs(other, |err| err.into())
+        self.with_map_errs(other, std::convert::identity)
     }
 }
 
