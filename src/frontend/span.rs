@@ -156,18 +156,18 @@ where
     }
 }
 
-impl<S, O, T, V> MapSpan<S, O> for AnyTerm<S, T, V>
+impl<S, O, T, V> MapSpan<S, O> for AnyTerm<T, V>
 where
     T: MapSpan<S, O>,
     V: MapSpan<S, O>,
 {
-    type Target = AnyTerm<O, T::Target, V::Target>;
+    type Target = AnyTerm<T::Target, V::Target>;
 
     fn map_span(self, cb: &mut impl FnMut(S) -> O) -> Self::Target {
         use AnyTerm::*;
         match self {
-            Variable(el) => Variable(el.map_span(cb)),
-            Value(el) => Value(el.map_span(cb)),
+            Variable(var) => Variable(var.map_span(cb)),
+            Value(val) => Value(val.map_span(cb)),
         }
     }
 }

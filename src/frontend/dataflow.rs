@@ -74,7 +74,7 @@ where
         let proposed_types = Variable::new_from(base_types.enter(scope), step.clone());
         let item_types = Variable::new(scope, step.clone());
 
-        let resolved_types: Variable<_, (ResourceId, Spanned<SpanKey, Type<SpanKey>>), isize> =
+        let resolved_types: Variable<_, (ResourceId, Type<SpanKey>), isize> =
             Variable::new(scope, step.clone());
 
         // create a bag of diagnostics to aggregate from each operation
@@ -87,7 +87,7 @@ where
                 .enter(scope)
                 .join(&resolved_types)
                 .map(value)
-                .flat_map(|((key, src), dst)| src.unify(key, dst.inner)),
+                .flat_map(|((key, src), dst)| src.unify(key, dst)),
         );
 
         // reduce the variable types of each item into a single map
@@ -98,8 +98,7 @@ where
             .join(&head_types.enter(scope))
             .map(value)
             .flat_map(|(vars, (relation, dst))| {
-                dst.map(|dst| dst.flat_quantify(&mut |var| vars.get(&var).cloned()))
-                    .flatten()
+                dst.flat_quantify(&mut |_span, var| vars.get(&var).cloned().map(|var| var.inner))
                     .map(|ty| (relation, ty))
             })
             .distinct();
@@ -317,9 +316,9 @@ pub fn unspan(
 
 pub fn resolve_proposed_types(
     key: &ResourceId,
-    input: &[(&Spanned<SpanKey, Type<SpanKey>>, isize)],
+    input: &[(&Type<SpanKey>, isize)],
     output: &mut Vec<(
-        Result<(ResourceId, Spanned<SpanKey, Type<SpanKey>>), Diagnostic<SpanKey>>,
+        Result<(ResourceId, Type<SpanKey>), Diagnostic<SpanKey>>,
         isize,
     )>,
 ) {
@@ -387,11 +386,8 @@ pub fn merge_var_types(
                         span: var.span,
                         kind: DiagnosticKind::Error,
                         labels: vec![
-                            def.to_spanned_string().map(|def| {
-                                format!("The variable was inferred to be {def} here...")
-                            }),
+                            def.map(|def| format!("The variable was inferred to be {def} here...")),
                             ty.clone()
-                                .to_spanned_string()
                                 .map(|ty| format!("...but expected to be {ty} here.")),
                         ],
                     };

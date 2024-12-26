@@ -188,7 +188,7 @@ impl Parse for CardinalityConstraintKind {
     }
 }
 
-impl Parse for Atom<Range, String, Term<Range, String>> {
+impl Parse for Atom<Range, String, Term<String>> {
     fn parse<'tree>(src: &str, node: &Node<'tree>, cursor: &mut TreeCursor<'tree>) -> Self {
         let relation_node = node.child_by_field_name("relation").unwrap();
         let relation = Parse::parse(src, &relation_node, cursor);
@@ -214,7 +214,7 @@ impl<T: Parse> Parse for Pattern<Range, T> {
     }
 }
 
-impl<T: Parse> Parse for Term<Range, T> {
+impl<T: Parse> Parse for Term<T> {
     fn parse<'tree>(src: &str, node: &Node<'tree>, cursor: &mut TreeCursor<'tree>) -> Self {
         let node = &node;
         match node.kind() {

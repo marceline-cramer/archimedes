@@ -63,15 +63,15 @@ pub struct Decision<S, R, T>(pub Rule<S, R, T>);
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Rule<S, R, T> {
-    pub head: Spanned<S, Atom<S, R, Term<S, T>>>,
-    pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
+    pub head: Spanned<S, Atom<S, R, Term<T>>>,
+    pub body: Vec<Spanned<S, Atom<S, R, Term<T>>>>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Constraint<S, R, T> {
     pub captures: Vec<Spanned<S, T>>,
     pub kind: Spanned<S, ConstraintKind>,
-    pub body: Vec<Spanned<S, Atom<S, R, Term<S, T>>>>,
+    pub body: Vec<Spanned<S, Atom<S, R, Term<T>>>>,
 }
 
 #[derive(Copy, Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
@@ -90,26 +90,17 @@ pub enum CardinalityConstraintKind {
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub struct Atom<S, R, T> {
     pub relation: Spanned<S, R>,
-    pub pattern: Spanned<S, Pattern<S, T>>,
+    pub pattern: SpannedPattern<S, T>,
 }
 
-pub type Type<S> = Pattern<S, PrimitiveType>;
+pub type Type<S> = SpannedPattern<S, PrimitiveType>;
+
+pub type SpannedPattern<S, T> = Spanned<S, Pattern<S, T>>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
 pub enum Pattern<S, T> {
-    Leaf(Spanned<S, T>),
-    Tuple(Spanned<S, Vec<Spanned<S, Self>>>),
-}
-
-impl<S, T: Display> Pattern<S, T> {
-    pub fn to_spanned_string(self) -> Spanned<S, String> {
-        let rendered = self.to_string();
-
-        match self {
-            Pattern::Leaf(el) => el.map(|_| rendered),
-            Pattern::Tuple(el) => el.map(|_| rendered),
-        }
-    }
+    Leaf(T),
+    Tuple(Vec<Spanned<S, Self>>),
 }
 
 impl<S, T: Display> Display for Pattern<S, T> {
@@ -129,13 +120,13 @@ impl<S, T: Display> Display for Pattern<S, T> {
     }
 }
 
-pub type Term<S, T> = AnyTerm<S, T, Value>;
-pub type TypeTerm<S, T> = AnyTerm<S, T, PrimitiveType>;
+pub type Term<T> = AnyTerm<T, Value>;
+pub type TypeTerm<T> = AnyTerm<T, PrimitiveType>;
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]
-pub enum AnyTerm<S, T, V> {
-    Variable(Spanned<S, T>),
-    Value(Spanned<S, V>),
+pub enum AnyTerm<T, V> {
+    Variable(T),
+    Value(V),
 }
 
 #[derive(Clone, Debug, PartialEq, Eq, PartialOrd, Ord, Hash, Deserialize, Serialize)]

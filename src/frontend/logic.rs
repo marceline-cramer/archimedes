@@ -43,7 +43,7 @@ impl<S: Clone> IndexedItem<S, ResourceId> {
 }
 
 impl<S: Clone, R: Clone> IndexedItem<S, R> {
-    pub fn base_type(self) -> Option<(R, Spanned<S, Type<S>>)> {
+    pub fn base_type(self) -> Option<(R, Type<S>)> {
         let rule = self.rule_or_decision()?;
 
         if !rule.body.is_empty() {
@@ -56,21 +56,13 @@ impl<S: Clone, R: Clone> IndexedItem<S, R> {
             .head
             .inner
             .pattern
-            .inner
-            .flat_quantify(&mut |_| None)?
-            .map_leaves(&mut |leaf| leaf.ty());
-
-        let ty = Spanned {
-            span: rule.head.span.clone(),
-            inner: ty,
-        };
+            .flat_quantify(&mut |_, _| None)?
+            .map_leaves(&mut |_span, leaf| leaf.ty());
 
         Some((relation, ty))
     }
 
-    pub fn head_type(
-        self,
-    ) -> Option<(R, Spanned<S, Pattern<S, AnyTerm<S, usize, PrimitiveType>>>)> {
+    pub fn head_type(self) -> Option<(R, SpannedPattern<S, TypeTerm<usize>>)> {
         let rule = self.rule_or_decision()?;
 
         // TODO: this actually would replace the work of base_types if unblocked
@@ -84,23 +76,17 @@ impl<S: Clone, R: Clone> IndexedItem<S, R> {
             .head
             .inner
             .pattern
-            .inner
-            .map_leaves(&mut |term| match term {
+            .map_leaves(&mut |_span, term| match term {
                 AnyTerm::Variable(name) => AnyTerm::Variable(name),
-                AnyTerm::Value(val) => AnyTerm::Value(val.map(|inner| inner.ty())),
+                AnyTerm::Value(val) => AnyTerm::Value(val.ty()),
             });
-
-        let ty = Spanned {
-            span: rule.head.span,
-            inner: ty,
-        };
 
         Some((relation, ty))
     }
 
     pub fn body_types(
         (key, item): (Key<Self>, Self),
-    ) -> Vec<(R, (Key<Self>, Pattern<S, TypeTerm<S, usize>>))> {
+    ) -> Vec<(R, (Key<Self>, SpannedPattern<S, TypeTerm<usize>>))> {
         let body = match item.inner {
             ModuleItem::Decision(Decision(rule)) => rule.body,
             ModuleItem::Rule(rule) => rule.body,
@@ -112,10 +98,13 @@ impl<S: Clone, R: Clone> IndexedItem<S, R> {
             .map(move |atom| {
                 let relation = atom.relation.inner.clone();
 
-                let ty = atom.inner.pattern.inner.map_leaves(&mut |term| match term {
-                    AnyTerm::Variable(name) => AnyTerm::Variable(name),
-                    AnyTerm::Value(val) => AnyTerm::Value(val.map(|inner| inner.ty())),
-                });
+                let ty = atom
+                    .inner
+                    .pattern
+                    .map_leaves(&mut |_span, term| match term {
+                        AnyTerm::Variable(name) => AnyTerm::Variable(name),
+                        AnyTerm::Value(val) => AnyTerm::Value(val.ty()),
+                    });
 
                 (relation, (key, ty))
             })
@@ -152,26 +141,32 @@ impl<S: Clone, R: Clone> ModuleItem<S, R, String> {
             let idx = entry.index();
 
             use indexmap::map::Entry;
-            let new = match entry {
-                Entry::Occupied(_) => false,
+            match entry {
+                Entry::Occupied(mut entry) => {
+                    // the spans for variables appearing in the head belong there
+                    if is_head {
+                        entry.insert(span.clone());
+                    }
+                }
                 Entry::Vacant(entry) => {
                     entry.insert(span.clone());
-                    true
+
+                    // if this is the first time the variable has appeared
+                    // and this is a head pattern, report an error
+                    if is_head {
+                        let d = Diagnostic {
+                            span: span.clone(),
+                            kind: DiagnosticKind::Error,
+                            message: format!("{name:?} does not appear within body"),
+                            labels: vec![Spanned {
+                                span: span.clone(),
+                                inner: "Defined here.".to_string(),
+                            }],
+                        };
+
+                        diagnostics.push((url.clone(), d));
+                    }
                 }
-            };
-
-            if is_head && new {
-                let d = Diagnostic {
-                    span: span.clone(),
-                    kind: DiagnosticKind::Error,
-                    message: format!("{name:?} does not appear within body"),
-                    labels: vec![Spanned {
-                        span: span.clone(),
-                        inner: "Defined here.".to_string(),
-                    }],
-                };
-
-                diagnostics.push((url.clone(), d));
             }
 
             idx
@@ -292,11 +287,11 @@ impl<S, R, T> Constraint<S, R, T> {
     }
 }
 
-impl<S, R, T, V> Atom<S, R, AnyTerm<S, T, V>> {
-    pub fn map_variables<O>(self, cb: &mut impl FnMut(&S, T) -> O) -> Atom<S, R, AnyTerm<S, O, V>> {
+impl<S, R, T, V> Atom<S, R, AnyTerm<T, V>> {
+    pub fn map_variables<O>(self, cb: &mut impl FnMut(&S, T) -> O) -> Atom<S, R, AnyTerm<O, V>> {
         Atom {
             relation: self.relation,
-            pattern: self.pattern.map(|inner| inner.map_variables(cb)),
+            pattern: self.pattern.map_variables(cb),
         }
     }
 }
@@ -313,7 +308,7 @@ impl<S, R, T> Atom<S, R, T> {
     }
 }
 
-impl<S: Clone + Debug + Eq, T> Pattern<S, TypeTerm<S, T>> {
+impl<S: Clone + Debug + Eq, T: Clone> SpannedPattern<S, TypeTerm<T>> {
     pub fn unify<K: Clone>(
         self,
         key: K,
@@ -339,8 +334,8 @@ impl<S: Clone + Debug + Eq, T> Pattern<S, TypeTerm<S, T>> {
         diagnostics: &mut Vec<Diagnostic<S>>,
         cb: &mut impl FnMut(Spanned<S, T>, Type<S>),
     ) {
-        match self {
-            Pattern::Tuple(lhs) => match target {
+        match &self.inner {
+            Pattern::Tuple(lhs) => match target.inner {
                 Pattern::Tuple(rhs) => {
                     if lhs.len() != rhs.len() {
                         diagnostics.push(Diagnostic {
@@ -350,143 +345,148 @@ impl<S: Clone + Debug + Eq, T> Pattern<S, TypeTerm<S, T>> {
                                 lhs.len(),
                                 rhs.len()
                             ),
-                            span: lhs.span,
+                            span: target.span,
                             // TODO
                             labels: vec![],
                         });
                     } else {
-                        lhs.inner.into_iter().zip(rhs.inner).for_each(|(lhs, rhs)| {
-                            lhs.inner.unify_inner(rhs.inner, diagnostics, cb)
-                        });
+                        lhs.into_iter()
+                            .zip(rhs)
+                            .for_each(|(lhs, rhs)| lhs.clone().unify_inner(rhs, diagnostics, cb));
                     }
                 }
                 Pattern::Leaf(prim) => {
                     diagnostics.push(Diagnostic {
                         kind: DiagnosticKind::Error,
-                        message: format!(
-                            "Expected tuple of arity {}, got {:?}",
-                            lhs.len(),
-                            prim.inner
-                        ),
-                        span: lhs.span,
+                        message: format!("Expected tuple of arity {}, got {:?}", lhs.len(), prim),
+                        span: target.span,
                         // TODO
                         labels: vec![],
                     });
                 }
             },
-            Pattern::Leaf(leaf) => match leaf.inner {
-                AnyTerm::Variable(var) => {
-                    cb(var, target);
+            Pattern::Leaf(AnyTerm::Variable(var)) => {
+                let var = var.clone();
+                cb(self.map(|_| var), target);
+            }
+            Pattern::Leaf(AnyTerm::Value(prim)) => {
+                if Pattern::Leaf(prim.clone()) != target.inner {
+                    diagnostics.push(Diagnostic {
+                        kind: DiagnosticKind::Error,
+                        message: format!("Expected {:?}, got {target:?}", prim),
+                        span: target.span,
+                        // TODO
+                        labels: vec![],
+                    });
                 }
-                AnyTerm::Value(prim) => {
-                    if Pattern::Leaf(prim.clone()) != target {
-                        diagnostics.push(Diagnostic {
-                            span: prim.span,
-                            kind: DiagnosticKind::Error,
-                            message: format!("Expected {:?}, got {target:?}", prim.inner),
-                            // TODO
-                            labels: vec![],
-                        });
-                    }
-                }
-            },
+            }
         }
     }
 }
 
-impl<S, T, V> Pattern<S, AnyTerm<S, T, V>> {
-    pub fn map_variables<O>(self, cb: &mut impl FnMut(&S, T) -> O) -> Pattern<S, AnyTerm<S, O, V>> {
-        self.map_leaves(&mut |term| term.map_variable(cb))
+impl<S, T, V> SpannedPattern<S, AnyTerm<T, V>> {
+    pub fn map_variables<O>(
+        self,
+        cb: &mut impl FnMut(&S, T) -> O,
+    ) -> SpannedPattern<S, AnyTerm<O, V>> {
+        self.map_leaves(&mut |span, term| term.map_variable(&mut |var| cb(span, var)))
     }
 
     pub fn flat_quantify(
         self,
-        cb: &mut impl FnMut(T) -> Option<Pattern<S, V>>,
-    ) -> Option<Pattern<S, V>> {
+        cb: &mut impl FnMut(&S, T) -> Option<Pattern<S, V>>,
+    ) -> Option<SpannedPattern<S, V>> {
         use Pattern::*;
-        Some(match self {
-            Leaf(leaf) => match leaf.inner {
-                AnyTerm::Variable(var) => cb(var.inner)?,
-                AnyTerm::Value(val) => Leaf(val),
+        Some(match self.inner {
+            Leaf(leaf) => {
+                let inner = match leaf {
+                    AnyTerm::Variable(var) => cb(&self.span, var)?,
+                    AnyTerm::Value(val) => Leaf(val),
+                };
+
+                Spanned {
+                    span: self.span,
+                    inner,
+                }
+            }
+            Tuple(tuple) => {
+                let mut els = Vec::with_capacity(tuple.len());
+                for el in tuple {
+                    let el = el.flat_quantify(cb)?;
+                    els.push(el);
+                }
+
+                Spanned {
+                    inner: Tuple(els),
+                    span: self.span,
+                }
+            }
+        })
+    }
+
+    pub fn quantify(self, cb: &mut impl FnMut(&S, T) -> Pattern<S, V>) -> SpannedPattern<S, V> {
+        self.flat_quantify(&mut |span, term| Some(cb(span, term)))
+            .unwrap()
+    }
+}
+
+impl<S, T> SpannedPattern<S, T> {
+    pub fn flat_map_leaves<O>(
+        self,
+        cb: &mut impl FnMut(&S, T) -> Option<O>,
+    ) -> Option<SpannedPattern<S, O>> {
+        use Pattern::*;
+        Some(match self.inner {
+            Leaf(leaf) => Spanned {
+                inner: Leaf(cb(&self.span, leaf)?),
+                span: self.span,
             },
             Tuple(tuple) => {
                 let mut els = Vec::with_capacity(tuple.len());
-                for el in tuple.inner {
-                    let el = el.map(|inner| inner.flat_quantify(cb)).flatten()?;
+                for el in tuple {
+                    let el = el.flat_map_leaves(cb)?;
                     els.push(el);
                 }
 
-                Tuple(Spanned {
-                    span: tuple.span,
-                    inner: els,
-                })
+                Spanned {
+                    inner: Tuple(els),
+                    span: self.span,
+                }
             }
         })
     }
 
-    pub fn quantify(self, cb: &mut impl FnMut(T) -> Pattern<S, V>) -> Pattern<S, V> {
-        self.flat_quantify(&mut |term| Some(cb(term))).unwrap()
+    pub fn map_leaves<O>(self, cb: &mut impl FnMut(&S, T) -> O) -> SpannedPattern<S, O> {
+        self.flat_map_leaves(&mut |span, var| Some(cb(span, var)))
+            .unwrap()
     }
 }
 
-impl<S, T> Pattern<S, T> {
-    pub fn flat_map_leaves<O>(self, cb: &mut impl FnMut(T) -> Option<O>) -> Option<Pattern<S, O>> {
-        use Pattern::*;
-        Some(match self {
-            Leaf(leaf) => Leaf(leaf.map(cb).flatten()?),
-            Tuple(tuple) => {
-                let mut els = Vec::with_capacity(tuple.len());
-                for el in tuple.inner {
-                    let el = el.map(|inner| inner.flat_map_leaves(cb)).flatten()?;
-                    els.push(el);
-                }
-
-                Tuple(Spanned {
-                    span: tuple.span,
-                    inner: els,
-                })
-            }
-        })
-    }
-
-    pub fn map_leaves<O>(self, cb: &mut impl FnMut(T) -> O) -> Pattern<S, O> {
-        self.flat_map_leaves(&mut |var| Some(cb(var))).unwrap()
-    }
-}
-
-impl<S, T, V> AnyTerm<S, T, V> {
+impl<T, V> AnyTerm<T, V> {
     pub fn flat_map_variable<O>(
         self,
-        cb: &mut impl FnMut(&S, T) -> Option<O>,
-    ) -> Option<AnyTerm<S, O, V>> {
+        cb: &mut impl FnMut(T) -> Option<O>,
+    ) -> Option<AnyTerm<O, V>> {
         use AnyTerm::*;
         Some(match self {
-            Variable(var) => Variable(Spanned {
-                inner: cb(&var.span, var.inner)?,
-                span: var.span,
-            }),
+            Variable(var) => Variable(cb(var)?),
             Value(val) => Value(val),
         })
     }
 
-    pub fn map_variable<O>(self, cb: &mut impl FnMut(&S, T) -> O) -> AnyTerm<S, O, V> {
-        self.flat_map_variable(&mut |span, var| Some(cb(span, var)))
-            .unwrap()
+    pub fn map_variable<O>(self, cb: &mut impl FnMut(T) -> O) -> AnyTerm<O, V> {
+        self.flat_map_variable(&mut |var| Some(cb(var))).unwrap()
     }
 
-    pub fn flat_quantify(self, cb: &mut impl FnMut(&S, T) -> Option<V>) -> Option<Spanned<S, V>> {
+    pub fn flat_quantify(self, cb: &mut impl FnMut(T) -> Option<V>) -> Option<V> {
         use AnyTerm::*;
         Some(match self {
-            Variable(var) => Spanned {
-                inner: cb(&var.span, var.inner)?,
-                span: var.span,
-            },
+            Variable(var) => cb(var)?,
             Value(val) => val,
         })
     }
 
-    pub fn quantify(self, cb: &mut impl FnMut(&S, T) -> V) -> Spanned<S, V> {
-        self.flat_quantify(&mut |span, var| Some(cb(span, var)))
-            .unwrap()
+    pub fn quantify(self, cb: &mut impl FnMut(T) -> V) -> V {
+        self.flat_quantify(&mut |var| Some(cb(var))).unwrap()
     }
 }
