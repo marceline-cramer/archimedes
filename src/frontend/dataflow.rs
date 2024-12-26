@@ -128,6 +128,12 @@ where
         .concat(&item_types)
         .distinct();
 
+    // find unknown type diagnostics
+    let unknown_types = var_types
+        .join(&item_keys)
+        .map(value)
+        .flat_map(|(vars, item)| item.unknown_type_diagnostics(&vars));
+
     // combine all inlay hints
     let inlay_hints = var_types
         .join(&item_keys)
@@ -140,6 +146,7 @@ where
 
     // combine all diagnostics
     let diagnostics = type_diagnostics
+        .concat(&unknown_types)
         .flat_map(|d| d.clone().span_set().map(move |span| (span, d.clone())))
         .join(&span_keys)
         .map(|(key, (d, span))| (d, (key, span)))

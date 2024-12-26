@@ -40,6 +40,27 @@ impl<S: Clone> IndexedItem<S, ResourceId> {
             })
             .collect()
     }
+
+    pub fn unknown_type_diagnostics(self, vars: &BTreeMap<usize, Type<S>>) -> Vec<Diagnostic<S>> {
+        self.variables
+            .iter()
+            .enumerate()
+            .flat_map(|(idx, name)| {
+                if vars.contains_key(&idx) {
+                    return None;
+                }
+
+                Some(Diagnostic {
+                    span: name.span.clone(),
+                    message: "Unknown type".to_string(),
+                    kind: DiagnosticKind::Error,
+                    labels: vec![name
+                        .clone()
+                        .map(|name| format!("Could not infer type of {name:?}"))],
+                })
+            })
+            .collect()
+    }
 }
 
 impl<S: Clone, R: Clone> IndexedItem<S, R> {
